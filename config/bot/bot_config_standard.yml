@@ -1,0 +1,35 @@
+- search_key: "123456789
+  bot_name: "示例Bot
+  bot_nickname: "示例1,示例2
+  llm_model: "glm-4.6-fc"
+  basic_info: |
+    这里是 Bot 的基本信息。
+    可以换行，但是必须保持 YAML 格式缩进正确。
+  expression_habits: |
+    这里是 Bot 的表达习惯。
+    可以换行，但是必须保持 YAML 格式缩进正确。
+  think_requirement: |
+    这里是 Bot 的思考要求。
+    可以换行，但是必须保持 YAML 格式缩进正确。
+  reply_instruction: |
+    这里是 Bot 的回复指导。
+    可以换行，但是必须保持 YAML 格式缩进正确。
+  function_call_instruction: |
+    这里是 Bot 的工具调用指导。
+    可以换行，但是必须保持 YAML 格式缩进正确。
+  overusage_output: "这里是超出使用量时的输出内容"
+  error_output: "这里是工作流报错时的输出内容"
+  admin_users:
+    - "管理员QQ号1"
+    - "管理员QQ号2"
+  default_groups:
+    - "采用默认配置的群组QQ号1"
+    - "采用默认配置的群组QQ号2"
+  favor_prompts:
+    - "阶段1"
+    - "阶段2"
+    - "现在可以自定义若干个阶段，且程序有一定纠错能力，可以应对用户输入的阶段数与分割点数不匹配的情况。"
+  favor_split_points:
+    - 0
+    - 100
+    - 200

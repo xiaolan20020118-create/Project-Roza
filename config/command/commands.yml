@@ -1,0 +1,27 @@
+commands:
+  # clear
+  - /Roza.clear
+  - /Roza.clear.favor
+  - /Roza.clear.usage
+  - /Roza.clear.memory
+  - /Roza.clear.context
+  - /Roza.clear.persona
+  - /Roza.clear.blacklist
+
+  # get
+  - /Roza.get
+  - /Roza.get.favor
+  - /Roza.get.usage
+  - /Roza.get.memory
+  - /Roza.get.context
+  - /Roza.get.persona
+  - /Roza.get.blacklist
+
+  # set
+  - /Roza.set
+  - /Roza.set.favor
+  - /Roza.set.usage
+  - /Roza.set.memory
+  - /Roza.set.context
+  - /Roza.set.persona
+  - /Roza.set.blacklist
