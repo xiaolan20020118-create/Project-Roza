@@ -146,7 +146,7 @@ def main(
 ) -> Dict[str, Any]:
     """
     历史会话更新主函数
-    
+
     参数：
     - output: 输出字典
     - user_name: 用户名称
@@ -158,7 +158,7 @@ def main(
     - user_id: 用户ID
     - token_usage: token使用量字典，包含total_token和prompt_token字段
     - MONGO_URL: MongoDB连接URL
-    
+
     返回：
     - total_histories: 总历史条目数
     - history_entry: 本次创建的历史条目
@@ -249,14 +249,14 @@ def main(
             "total_prompt_token": current_total_usage.get("total_prompt_token", 0) + prompt_tokens,
             "total_output_token": current_total_usage.get("total_output_token", 0) + completion_tokens
         }
-        
-        # 更新数据库
+
+        # 更新数据库（total_usage各群独立，只更新当前群组）
         mongo_system.update_field(bot_id, group_id, user_id, "total_usage", new_total_usage)
-        
+
     except Exception as e:
         # 如果token统计更新失败，不影响历史记录的保存
         print(f"Warning: Failed to update token usage statistics: {e}")
-    
+
     # 返回结果（将history_entry转换为JSON字符串，并包含total_usage的四个字段）
     return {
         "total_histories": update_result["total_histories"],

@@ -93,13 +93,13 @@ class FavorUpdater:
                                  new_favor_value: int, favor_change: int) -> Dict[str, Any]:
         """
         跨群组更新好感度
-        更新所有bot_id相同且user_id相同的文档
-        
+        更新所有bot_id相同且user_id相同的文档（包括9999模板文档）
+
         返回：
         - matched_count: 匹配的文档数
         - modified_count: 修改的文档数
         """
-        # 更新所有符合条件的文档
+        # 更新所有符合条件的文档（包括9999模板）
         result = self.mongo_system.collection.update_many(
             {
                 "bot_id": bot_id,
@@ -113,7 +113,7 @@ class FavorUpdater:
                 }
             }
         )
-        
+
         return {
             "matched_count": result.matched_count,
             "modified_count": result.modified_count

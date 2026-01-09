@@ -10,85 +10,250 @@ from typing import Dict, Any, Optional, Tuple, List
 
 class MongoDBSystem:
     """统一的MongoDB系统 - 管理所有数据库操作"""
-    
+
+    # 模板文档的group_id常量
+    TEMPLATE_GROUP_ID = "9999"
+
     def __init__(self, mongo_url: str, db_name: str = "roza_database"):
         self.client = pymongo.MongoClient(mongo_url)
         self.db = self.client[db_name]
         self.collection = self.db["user_data"]
-        
+
         # 创建复合索引，确保快速查询
         self.collection.create_index([
             ("bot_id", 1),
-            ("group_id", 1), 
+            ("group_id", 1),
             ("user_id", 1)
         ], unique=True)
-    
+
+        # 跨群配置（默认值）
+        self._favor_cross_group = "disable"
+        self._persona_cross_group = "disable"
+        self._blacklist_cross_group = "disable"
+        self._usage_limit_cross_group = "disable"
+
+    def set_cross_group_config(self, favor_cross_group: str = "disable",
+                               persona_cross_group: str = "disable",
+                               blacklist_cross_group: str = "disable",
+                               usage_limit_cross_group: str = "disable"):
+        """
+        设置跨群配置参数
+
+        参数：
+            favor_cross_group: 好感度是否跨群
+            persona_cross_group: 用户画像是否跨群
+            blacklist_cross_group: 黑名单是否跨群
+            usage_limit_cross_group: 用量统计是否跨群
+        """
+        self._favor_cross_group = favor_cross_group
+        self._persona_cross_group = persona_cross_group
+        self._blacklist_cross_group = blacklist_cross_group
+        self._usage_limit_cross_group = usage_limit_cross_group
+
+    def _get_default_persona_attributes(self) -> Dict[str, str]:
+        """获取默认的用户画像属性"""
+        return {
+            "basic_info": "",
+            "living_habits": "",
+            "psychological_traits": "",
+            "interests_preferences": "",
+            "dislikes": "",
+            "ai_expectations": "",
+            "memory_points": "",
+        }
+
+    def _get_default_block_stats(self) -> Dict[str, Any]:
+        """获取默认的黑名单状态"""
+        current_time = datetime.utcnow()
+        return {
+            "block_status": True,  # True=pass, False=block
+            "block_count": 0,
+            "last_operate_time": current_time.isoformat()
+        }
+
+    def _get_default_total_usage(self) -> Dict[str, int]:
+        """获取默认的总使用量统计"""
+        return {
+            "total_chat_count": 0,
+            "total_tokens": 0,
+            "total_prompt_token": 0,
+            "total_output_token": 0
+        }
+
     def get_document(self, bot_id: str, group_id: str, user_id: str) -> Dict[str, Any]:
-        """获取用户文档，如果不存在则创建默认文档"""
+        """
+        获取用户文档，如果不存在则创建默认文档
+
+        新逻辑：当用户首次进入新群组时，根据跨群配置决定是否从9999模板继承数据
+        跨群配置通过set_cross_group_config()方法设置
+
+        参数：
+            bot_id: 机器人ID
+            group_id: 群组ID
+            user_id: 用户ID
+
+        返回：用户文档字典
+        """
+        # 步骤1：尝试读取当前群组文档
         document = self.collection.find_one({
             "bot_id": bot_id,
             "group_id": group_id,
             "user_id": user_id
         })
-        
-        if not document:
-            # 创建新文档 - 根据新的表结构设计
-            current_time = datetime.utcnow()
-            default_doc = {
-                "bot_id": bot_id,
-                "group_id": group_id,
-                "user_id": user_id,
-                # 黑名单相关字段
-                "block_stats": {
-                    "block_status": True,  # True=pass, False=block
-                    "block_count": 0,
-                    "last_operate_time": current_time.isoformat()
-                },
-                # 上下文相关字段删掉，长期记忆短期记忆和用户画像系统共同维护一套历史对话记录
-                # 好感度相关字段调整功能，不再记录互动次数，互动次数信息调整至总的统计信息里
-                "favor_value": 0,
-                "last_favor_change": 0,
-                # 长期记忆相关字段修改保存内容并改成array，用于保存经过清洗的长期记忆内容
-                "long_term_memory": [],
-                # 记忆array记录内容修改为为多轮对话历史信息
-                "history_entries": [],
-                "history_stats": {
-                    "total_histories": 0
-                    # 修改统计信息，不再记录重复的时间戳和无用的平均取回计数，改成只记录总消息数量
-                },
-                # 用户画像相关字段
-                # 不再单独维护用户画像描述
-                # 不再维护用户画像单独的记忆池
-                # 不再单独维护用户画像统计信息
-                # 修改用户画像特征的记录方式为字符串记录
-                "persona_attributes": {
-                    "basic_info": "",
-                    "living_habits": "",
-                    "psychological_traits": "",
-                    "interests_preferences": "",
-                    "dislikes": "",
-                    "ai_expectations": "",
-                    "memory_points": "",
-                },
-                # 用量限制相关字段，修改记录名称以贴合实际用途
-                "daily_usage_count": 0,
-                # 不再单独维护last_request_date，直接使用updated_at判断日期
-  
-                # 总的统计数据
-                "created_at": current_time.isoformat(),
-                "updated_at": current_time.isoformat(),
-                # 总使用量统计（修改为字典结构）
-                "total_usage": {
-                    "total_chat_count": 0,      # 总对话次数
-                    "total_tokens": 0,          # 总token数
-                    "total_prompt_token": 0,    # 总输入token数
-                    "total_output_token": 0     # 总输出token数
-                },
-            }
-            self.collection.insert_one(default_doc)
-            return default_doc
-        
-        return document
+
+        # 如果文档存在，直接返回
+        if document:
+            return document
+
+        # 步骤2：文档不存在，查询9999模板和其他群组文档
+        current_time = datetime.utcnow()
+
+        # 查询9999模板文档
+        template_doc = self.collection.find_one({
+            "bot_id": bot_id,
+            "group_id": self.TEMPLATE_GROUP_ID,
+            "user_id": user_id
+        })
+
+        # 查询其他群组的文档（排除9999和当前群组）
+        other_group_docs = list(self.collection.find({
+            "bot_id": bot_id,
+            "user_id": user_id,
+            "group_id": {"$nin": [self.TEMPLATE_GROUP_ID, group_id]}
+        }).limit(1))
+
+        # 步骤3：判断场景并决定继承策略
+        # 场景A：9999模板存在 → 从9999继承
+        # 场景B：9999不存在，但有其他群组文档 → 从其他群组创建9999，再从9999继承
+        # 场景C：9999和其他群组都不存在 → 创建全新文档
+
+        has_template = template_doc is not None
+        has_other_group = len(other_group_docs) > 0
+
+        if not has_template and has_other_group:
+            # 场景B：从其他群组创建9999模板
+            source_doc = other_group_docs[0]
+            template_doc = self._create_template_from_source(bot_id, user_id, source_doc, current_time)
+
+        # 步骤4：构建新文档（根据跨群配置决定继承哪些字段）
+        new_doc = self._build_document_from_template(
+            bot_id=bot_id,
+            group_id=group_id,
+            user_id=user_id,
+            template_doc=template_doc,
+            current_time=current_time
+        )
+
+        # 步骤5：插入新文档并重新读取
+        self.collection.insert_one(new_doc)
+
+        # 重新读取并返回
+        document = self.collection.find_one({
+            "bot_id": bot_id,
+            "group_id": group_id,
+            "user_id": user_id
+        })
+
+        return document if document else new_doc
+
+    def _create_template_from_source(self, bot_id: str, user_id: str,
+                                      source_doc: Dict[str, Any],
+                                      current_time: datetime) -> Dict[str, Any]:
+        """
+        从源文档创建9999模板文档
+
+        参数：
+            bot_id: 机器人ID
+            user_id: 用户ID
+            source_doc: 源群组文档
+            current_time: 当前时间
+
+        返回：创建的9999模板文档
+        """
+        template_doc = {
+            "bot_id": bot_id,
+            "group_id": self.TEMPLATE_GROUP_ID,
+            "user_id": user_id,
+            # 从源文档继承跨群字段
+            # favor相关
+            "favor_value": source_doc.get("favor_value", 0),
+            "last_favor_change": source_doc.get("last_favor_change", 0),
+            # persona相关
+            "persona_attributes": source_doc.get("persona_attributes", self._get_default_persona_attributes()),
+            # blacklist相关
+            "block_stats": source_doc.get("block_stats", self._get_default_block_stats()),
+            # usage相关（只继承daily_usage_count，total_usage各群独立不继承）
+            "daily_usage_count": source_doc.get("daily_usage_count", 0),
+            # 不继承或使用默认值的字段
+            "total_usage": self._get_default_total_usage(),  # 各群独立，9999模板使用默认值
+            "long_term_memory": source_doc.get("long_term_memory", []),
+            "history_entries": [],
+            "history_stats": {"total_histories": 0},
+            # 时间戳
+            "created_at": current_time.isoformat(),
+            "updated_at": current_time.isoformat(),
+        }
+
+        # 插入9999模板文档
+        self.collection.insert_one(template_doc)
+
+        return template_doc
+
+    def _build_document_from_template(self, bot_id: str, group_id: str, user_id: str,
+                                       template_doc: Optional[Dict[str, Any]],
+                                       current_time: datetime) -> Dict[str, Any]:
+        """
+        根据模板文档和跨群配置构建新文档
+
+        参数：
+            bot_id: 机器人ID
+            group_id: 群组ID
+            user_id: 用户ID
+            template_doc: 9999模板文档（可能为None）
+            current_time: 当前时间
+
+        返回：构建的新文档
+        """
+        # 从模板继承或使用默认值的辅助函数
+        def get_value(field_name: str, default_value: Any, cross_group_enabled: str) -> Any:
+            if template_doc and cross_group_enabled == "enable":
+                return template_doc.get(field_name, default_value)
+            return default_value
+
+        # 构建新文档
+        new_doc = {
+            "bot_id": bot_id,
+            "group_id": group_id,
+            "user_id": user_id,
+
+            # blacklist相关字段（受blacklist_cross_group影响）
+            "block_stats": get_value("block_stats", self._get_default_block_stats(), self._blacklist_cross_group),
+
+            # favor相关字段（受favor_cross_group影响）
+            "favor_value": get_value("favor_value", 0, self._favor_cross_group),
+            "last_favor_change": get_value("last_favor_change", 0, self._favor_cross_group),
+
+            # persona相关字段（受persona_cross_group影响）
+            "persona_attributes": get_value("persona_attributes", self._get_default_persona_attributes(), self._persona_cross_group),
+
+            # usage相关字段
+            # daily_usage_count受usage_limit_cross_group影响
+            "daily_usage_count": get_value("daily_usage_count", 0, self._usage_limit_cross_group),
+
+            # total_usage各群独立，不继承
+            "total_usage": self._get_default_total_usage(),
+
+            # 非跨群字段（各群独立）
+            "long_term_memory": [],
+            "history_entries": [],
+            "history_stats": {"total_histories": 0},
+
+            # 系统字段
+            "created_at": current_time.isoformat(),
+            "updated_at": current_time.isoformat(),
+        }
+
+        return new_doc
     
     def update_document(self, bot_id: str, group_id: str, user_id: str, 
                        updates: Dict[str, Any]) -> Any:
@@ -127,7 +292,7 @@ class MongoDBSystem:
         current_value = self.get_field(bot_id, group_id, user_id, field_name)
         processed_value = process_function(current_value)
         result = self.update_field(bot_id, group_id, user_id, field_name, processed_value)
-        
+
         return {
             "original_value": current_value,
             "processed_value": processed_value,
@@ -136,10 +301,127 @@ class MongoDBSystem:
             "modified_count": result.modified_count
         }
 
+    def get_full_document_schema(self) -> Dict[str, Any]:
+        """
+        获取完整的用户数据文档结构定义（仅用于参考，不影响实际功能）
+
+        字段对应关系：
+        - favor: favor_value + last_favor_change（受favor_cross_group影响）
+        - usage: total_usage字典（4个字段，各群独立）+ daily_usage_count（受usage_limit_cross_group影响）
+        - memory: long_term_memory（各群独立）
+        - context: history_entries前N条（各群独立）
+        - persona: persona_attributes全部字段（受persona_cross_group影响）
+        - blacklist: block_stats全部字段（受blacklist_cross_group影响）
+
+        表结构字段对应关系：
+        - bot_id: 机器人ID（索引字段）
+        - group_id: 群组ID（索引字段，9999为跨群模板）
+        - user_id: 用户ID（索引字段）
+
+        跨群字段（存储在9999模板中）：
+        - favor相关（受favor_cross_group影响）：
+          ├─ favor_value: 好感度值（整数）
+          └─ last_favor_change: 最后一次好感度变化量（整数）
+        - persona相关（受persona_cross_group影响）：
+          └─ persona_attributes: 用户画像属性（字典）
+              ├─ basic_info: 基本信息
+              ├─ living_habits: 生活习惯
+              ├─ psychological_traits: 心理特征
+              ├─ interests_preferences: 兴趣偏好
+              ├─ dislikes: 反感点
+              ├─ ai_expectations: 对AI的期望
+              └─ memory_points: 希望记住的信息
+        - blacklist相关（受blacklist_cross_group影响）：
+          └─ block_stats: 黑名单状态（字典）
+              ├─ block_status: 封禁状态（True=pass, False=block）
+              ├─ block_count: 违规计数（整数）
+              └─ last_operate_time: 最后操作时间（ISO格式字符串）
+        - usage相关中受usage_limit_cross_group影响的字段：
+          └─ daily_usage_count: 每日使用量计数（整数，每日重置）
+
+        非跨群字段（每个群组独立）：
+        - memory相关：
+          └─ long_term_memory: 长期记忆数组（数组）
+        - context相关：
+          ├─ history_entries: 历史对话记录数组（数组）
+          └─ history_stats: 历史统计（字典）
+              └─ total_histories: 总历史条目数（整数）
+        - usage相关中各群独立的字段：
+          └─ total_usage: 总使用量统计（字典）
+              ├─ total_chat_count: 总对话次数（整数）
+              ├─ total_tokens: 总token数（整数）
+              ├─ total_prompt_token: 总输入token数（整数）
+              └─ total_output_token: 总输出token数（整数）
+
+        系统字段：
+        - created_at: 创建时间（ISO格式字符串）
+        - updated_at: 更新时间（ISO格式字符串）
+
+        返回：表结构定义字典
+        """
+        current_time = datetime.utcnow()
+        return {
+            # 索引字段
+            "bot_id": "机器人ID（字符串）",
+            "group_id": "群组ID（字符串），9999为跨群模板文档",
+            "user_id": "用户ID（字符串）",
+
+            # favor相关（受favor_cross_group影响）
+            "favor_value": "好感度值（整数，默认0）",
+            "last_favor_change": "最后一次好感度变化量（整数，默认0）",
+
+            # persona相关（受persona_cross_group影响）
+            "persona_attributes": {
+                "basic_info": "基本信息（字符串，默认空）",
+                "living_habits": "生活习惯（字符串，默认空）",
+                "psychological_traits": "心理特征（字符串，默认空）",
+                "interests_preferences": "兴趣偏好（字符串，默认空）",
+                "dislikes": "反感点（字符串，默认空）",
+                "ai_expectations": "对AI的期望（字符串，默认空）",
+                "memory_points": "希望记住的信息（字符串，默认空）",
+            },
+
+            # blacklist相关（受blacklist_cross_group影响）
+            "block_stats": {
+                "block_status": "封禁状态（布尔，True=pass, False=block，默认True）",
+                "block_count": "违规计数（整数，默认0）",
+                "last_operate_time": f"最后操作时间（ISO格式字符串，示例：{current_time.isoformat()}）",
+            },
+
+            # usage相关（部分受usage_limit_cross_group影响）
+            "daily_usage_count": "每日使用量计数（整数，默认0，每日重置，受usage_limit_cross_group影响）",
+            "total_usage": {
+                "total_chat_count": "总对话次数（整数，默认0，各群独立）",
+                "total_tokens": "总token数（整数，默认0，各群独立）",
+                "total_prompt_token": "总输入token数（整数，默认0，各群独立）",
+                "total_output_token": "总输出token数（整数，默认0，各群独立）",
+            },
+
+            # 非跨群字段（各群独立）
+            "long_term_memory": "长期记忆数组（数组，默认空）",
+            "history_entries": "历史对话记录数组（数组，默认空）",
+            "history_stats": {
+                "total_histories": "总历史条目数（整数，默认0）",
+            },
+
+            # 系统字段
+            "created_at": f"创建时间（ISO格式字符串，示例：{current_time.isoformat()}）",
+            "updated_at": f"更新时间（ISO格式字符串，示例：{current_time.isoformat()}）",
+        }
+
 
 class UtilityFunctions:
     """通用工具函数类"""
     
+    @staticmethod
+    def random_message(messages: Any) -> str:
+        """从消息数组中随机选择一条消息，如果不是数组则返回字符串本身"""
+        if isinstance(messages, list):
+            if not messages:
+                return ""
+            return random.choice(messages)
+        return str(messages) if messages else ""
+
     @staticmethod
     def ensure_json_serializable(obj: Any) -> Any:
         """确保对象是JSON可序列化的"""
@@ -300,11 +582,12 @@ class UsageLimitManager:
     
     def check_usage_limit(self, bot_id: str, group_id: str, user_id: str,
                          usage_limit: int, year: str, month: str, day: str,
-                         overusage_output: str) -> Dict[str, Any]:
+                         overusage_output: Any) -> Dict[str, Any]:
         """
         检查用户当前用量限制状态
         使用updated_at字段判断是否跨天，不再单独维护last_request_date
         返回：是否允许继续、停止消息、用量信息
+        overusage_output可以是字符串或字符串数组
         """
         # 获取当前用户的用量数据和最后更新时间
         current_usage = self.mongo_system.get_field(bot_id, group_id, user_id, "daily_usage_count")
@@ -354,7 +637,7 @@ class UsageLimitManager:
             else:
                 # 已经超限，拒绝请求
                 allow_continue = False
-                stop_message = overusage_output if overusage_output else "今日用量已达上限"
+                stop_message = self.util.random_message(overusage_output) if overusage_output else "今日用量已达上限"
                 
         else:
             # 日期异常（当前日期小于最后记录日期），保守策略：拒绝请求
@@ -860,7 +1143,8 @@ class IntegratedWorkflow:
     
     def step_2_input_length_check(self,
                                   user_query: str,
-                                  max_input_size: str) -> Dict[str, Any]:
+                                  max_input_size: str,
+                                  overinput_output: Any = None) -> Dict[str, Any]:
         """
         第2步：输入长度检查
         
@@ -876,8 +1160,7 @@ class IntegratedWorkflow:
         - max_length: 最大长度限制
         """
         
-        # 固定的提示消息
-        input_exceeds_message = "输入长度超过限制"
+        
         
         # 转换max_input_size为整型
         max_length = self.util.safe_int_convert(max_input_size, 0)
@@ -898,10 +1181,11 @@ class IntegratedWorkflow:
             }
         else:
             # 不满足条件，终止程序
+            stop_message = self.util.random_message(overinput_output) if overinput_output else "这么长谁看的过来啦……"
             return {
                 "continue_to_step_3": False,
                 "stop_reason": "input_exceeds_max_length",
-                "stop_message": input_exceeds_message,
+                "stop_message": stop_message,
                 "input_length": input_length,
                 "max_length": max_length
             }
@@ -917,7 +1201,7 @@ class IntegratedWorkflow:
                                  year: str,
                                  month: str,
                                  day: str,
-                                 overusage_output: str) -> Dict[str, Any]:
+                                 overusage_output: Any) -> Dict[str, Any]:
         """
         第3步：用量限制检查
         
@@ -930,7 +1214,7 @@ class IntegratedWorkflow:
         - is_user_admin: 用户是否是管理员 ("true"/"false" 字符串)
         - usage_limit: 每日用量限制（字符串）
         - year, month, day: 当前日期
-        - overusage_output: 超限时的提示消息
+        - overusage_output: 超限时的提示消息（字符串或字符串数组）
         
         返回：
         - continue_to_step_4: 是否继续到第4步
@@ -1226,13 +1510,19 @@ class IntegratedWorkflow:
 
 def main(
     # 基础参数
-    bot_id: str, 
-    group_id: str, 
+    bot_id: str,
+    group_id: str,
     user_id: str,
     user_query: str,
     main_prompt: str,
     MONGO_URL: str,
-    
+
+    # 跨群配置参数（用于9999模板继承逻辑）
+    favor_cross_group: str = "disable",
+    persona_cross_group: str = "disable",
+    blacklist_cross_group: str = "disable",
+    usage_limit_cross_group: str = "disable",
+
     # 第1步：黑名单检查参数
     blacklist_system: str = "disable",
     is_user_admin: str = "false",
@@ -1240,10 +1530,11 @@ def main(
     warn_lifespan: str = "0",
     block_lifespan: str = "0",
     timestamp: float = 0.0,
-    
+
     # 第2步：输入长度检查参数
     max_input_size: str = "0",
-    
+    overinput_output: Any = None,
+
     # 第3步：用量限制检查参数
     usage_limit_system: str = "disable",
     usage_restrict_admin_users: str = "disable",
@@ -1251,27 +1542,27 @@ def main(
     year: str = "1970",
     month: str = "01",
     day: str = "01",
-    overusage_output: str = "今日用量已达上限",
-    
+    overusage_output: Any = None,
+
     # 第4步：好感度提示词参数
     favor_system: str = "disable",
     favor_prompts: Optional[List[str]] = None,
     favor_split_points: Optional[List[int]] = None,
-    
+
     # 第5步：用户画像提示词参数
     persona_system: str = "disable",
-    
+
     # 第6步：上下文提示词参数
     context_system: str = "disable",
     context_pool_size: str = "0",
-    
+
     # 第7步：长期记忆提示词参数
     memory_system: str = "disable",
     memory_retrieval_number: str = "5"
 ) -> Dict[str, Any]:
     """
     整合工作流主函数 - 完整的7步工作流
-    
+
     执行顺序：
     1. 黑名单检查 -> 可能终止
     2. 输入长度检查 -> 可能终止
@@ -1280,13 +1571,26 @@ def main(
     5. 用户画像提示词生成
     6. 上下文提示词生成
     7. 长期记忆提示词生成 -> 返回最终结果
-    
+
+    跨群配置说明：
+    - favor_cross_group: 好感度是否跨群共享
+    - persona_cross_group: 用户画像是否跨群共享
+    - blacklist_cross_group: 黑名单状态是否跨群共享
+    - usage_limit_cross_group: 用量统计是否跨群共享
+
     返回：包含各步骤结果和最终增强的主提示词的字典
     """
-    
+
     # 初始化工作流
     workflow = IntegratedWorkflow(MONGO_URL)
-    
+
+    # 设置跨群配置到MongoDBSystem实例
+    workflow.mongo_system.set_cross_group_config(
+        favor_cross_group=favor_cross_group,
+        persona_cross_group=persona_cross_group,
+        blacklist_cross_group=blacklist_cross_group,
+        usage_limit_cross_group=usage_limit_cross_group
+    )
     # 第1步：黑名单检查
     step1_result = workflow.step_1_blacklist_check(
         bot_id=bot_id,
@@ -1332,7 +1636,8 @@ def main(
     # 第2步：输入长度检查
     step2_result = workflow.step_2_input_length_check(
         user_query=user_query,
-        max_input_size=max_input_size
+        max_input_size=max_input_size,
+        overinput_output=overinput_output
     )
     
     # 如果输入长度检查未通过，立即返回（展平的字典，包含所有字段的默认值）

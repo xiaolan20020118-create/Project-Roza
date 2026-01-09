@@ -25,3 +25,10 @@ commands:
   - /Roza.set.context
   - /Roza.set.persona
   - /Roza.set.blacklist
+
+  # rank
+  - /Roza.rank
+  - /Roza.rank.favor
+  - /Roza.rank.usage
+  - /Roza.rank.memory
+  - /Roza.rank.blacklist

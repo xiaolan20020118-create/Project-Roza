@@ -17,8 +17,12 @@
   function_call_instruction: |
     这里是 Bot 的工具调用指导。
     可以换行，但是必须保持 YAML 格式缩进正确。
-  overusage_output: "这里是超出使用量时的输出内容"
-  error_output: "这里是工作流报错时的输出内容"
+  overusage_output:
+    - "这里是超出使用量时的输出内容"
+  error_output:
+    - "这里是工作流报错时的输出内容"
+  overinput_output:
+    - "这里是输入过长时的输出内容"
   admin_users:
     - "管理员QQ号1"
     - "管理员QQ号2"

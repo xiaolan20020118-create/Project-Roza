@@ -48,6 +48,7 @@ def parse_command(user_query: str) -> CommandParts:
 
     segments = command_token.lstrip("/").split(".")
     # segments example: ["Roza", "set", "usage", "total_tokens", "any"]
+    # or: ["Roza", "rank", "usage", "total_usage", "total_chat_count", "any"]
     if len(segments) < 3 or segments[0] != "Roza":
         return "", "", None, False, []
 
@@ -56,14 +57,19 @@ def parse_command(user_query: str) -> CommandParts:
     field = None
     has_any = False
 
-    if len(segments) == 4:
-        if segments[3] == "any":
-            has_any = True
-        else:
-            field = segments[3]
-    elif len(segments) >= 5:
-        field = segments[3] if segments[3] != "any" else None
-        has_any = segments[4] == "any"
+    # 检查最后一个段是否为 "any"
+    if segments[-1] == "any":
+        has_any = True
+        # 中间的段构成 field
+        if len(segments) > 4:
+            field = ".".join(segments[3:-1])
+        elif len(segments) == 4:
+            # 只有 action.type.any，没有 field
+            pass
+    else:
+        # 没有 any，所有中间段构成 field
+        if len(segments) > 3:
+            field = ".".join(segments[3:])
 
     # allow trailing .any without params
     if not params and has_any:
@@ -75,6 +81,59 @@ def parse_command(user_query: str) -> CommandParts:
 
     return action, type_key, field, has_any, params
 
+
+# rank 操作支持的类型和字段映射
+RANK_FIELDS = {
+    "favor": ["favor_value", "last_favor_change"],
+    "usage": [
+        "daily_usage_count",
+        "total_usage.total_chat_count",
+        "total_usage.total_tokens",
+        "total_usage.total_prompt_token",
+        "total_usage.total_output_token",
+    ],
+    "memory": ["history_entries"],
+    "blacklist": ["block_stats.block_count"],
+}
+
+
+def _resolve_rank_field(type_key: str, field: str) -> Optional[str]:
+    """解析 rank 字段，使用叶子节点匹配
+
+    通过比较字段路径的最后一个部分（叶子节点）进行匹配，
+    无需输入完整的嵌套路径。
+
+    例如: total_chat_count -> 自动匹配 total_usage.total_chat_count
+          block_count -> 自动匹配 block_stats.block_count
+
+    Args:
+        type_key: 数据类型 (favor/usage/memory/blacklist)
+        field: 用户输入的字段（可以是完整路径或仅叶子节点）
+
+    Returns:
+        匹配的完整字段路径，如果无法匹配则返回 None
+    """
+    if not field:
+        return None
+
+    if type_key not in RANK_FIELDS:
+        return None
+
+    # 提取输入字段的叶子节点（最后一个 . 后的部分）
+    input_leaf = field.split(".")[-1]
+
+    # 遍历该类型支持的所有完整字段，查找叶子节点匹配的
+    for full_field in RANK_FIELDS[type_key]:
+        # 如果输入本身就是完整字段，直接返回
+        if field == full_field:
+            return full_field
+        # 比较叶子节点
+        full_leaf = full_field.split(".")[-1]
+        if input_leaf == full_leaf:
+            return full_field
+
+    # 未找到匹配
+    return None
 
 TYPE_DEFAULTS = {
     "favor": {
@@ -244,13 +303,13 @@ def _validate_set_value(type_key: str, field: str, value: Any) -> Any:
     return str(value)
 
 
-def _log_entry(command_type: str, modified: int, target: str, result: str) -> str:
-    return (
-        f"指令类型：{command_type}\n"
-        f"操作计数：{modified}\n"
-        f"指向对象：{target}\n"
-        f"执行结果：{result}\n\n"
-    )
+def _log_entry(command_type: str, modified: int, target: str, result: str) -> Dict[str, Any]:
+    return {
+        "command_type": command_type,
+        "operation_count": modified,
+        "target": target,
+        "result": result,
+    }
 
 
 def _extract_value(doc: Dict[str, Any], type_key: str, field: Optional[str], pool_size: int) -> str:
@@ -306,6 +365,52 @@ def _apply_set(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field
     return mongo.update_many(query, updates)
 
 
+def _apply_rank(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field: str, limit: int) -> List[Tuple[str, Any]]:
+    """对指定字段进行排序，返回前N个结果
+
+    Args:
+        mongo: MongoDB 实例
+        query: 查询条件
+        type_key: 类型 (favor/usage/memory/blacklist)
+        field: 排序字段
+        limit: 返回结果数量
+
+    Returns:
+        List[Tuple[user_id, value]]: 用户ID和对应值的列表
+    """
+    docs = mongo.find(query)
+
+    # 提取每个文档的排序字段值
+    results = []
+    for doc in docs:
+        # 清理 user_id 和 value，去除数据库中可能存在的空白字符
+        user_id = str(doc.get("user_id", "")).strip()
+        raw_value = _get_nested(doc, field)
+
+        # 处理不同类型的值
+        if raw_value is None:
+            numeric_value = 0
+        elif isinstance(raw_value, (int, float)):
+            numeric_value = raw_value
+        elif isinstance(raw_value, list):
+            # 对于数组类型（如 history_entries, long_term_memory），使用长度
+            numeric_value = len(raw_value)
+        else:
+            # 字符串类型先去除空白字符再转换
+            try:
+                numeric_value = float(str(raw_value).strip())
+            except (ValueError, TypeError):
+                numeric_value = 0
+
+        results.append((user_id, numeric_value))
+
+    # 按值从大到小排序
+    results.sort(key=lambda x: x[1], reverse=True)
+
+    # 返回前 limit 个结果
+    return results[:limit]
+
+
 def execute_command(
     user_query: str,
     bot_id: str,
@@ -351,13 +456,29 @@ def execute_command(
         "has_any": has_any,
     })
 
-    if action not in {"get", "set", "clear"} or not type_key:
+    if action not in {"get", "set", "clear", "rank"} or not type_key:
         response["result"] = "指令格式错误"
         return response
 
     if action == "set" and not field:
         response["result"] = "set指令必须指定精确字段"
         return response
+
+    if action == "rank":
+        if not field:
+            response["result"] = "rank指令必须指定精确字段"
+            return response
+        # 检查类型是否支持 rank
+        if type_key not in RANK_FIELDS:
+            response["result"] = f"rank指令不支持 {type_key} 类型，支持类型: {', '.join(RANK_FIELDS.keys())}"
+            return response
+        # 尝试解析字段（支持简写）
+        resolved_field = _resolve_rank_field(type_key, field)
+        if resolved_field is None:
+            response["result"] = f"rank指令不支持 {type_key} 类型的 {field} 字段"
+            return response
+        # 使用解析后的完整字段
+        field = resolved_field
 
     mongo = MongoDBSystem(mongo_url)
 
@@ -435,7 +556,7 @@ def execute_command(
             result_lines.append(f"[{target_label}: 清空完成，匹配{matched}，修改{modified}]")
             logs.append(_log_entry(command_label, modified, target_label, "ok" if matched else "not found"))
 
-    else:  # set
+    elif action == "set":
         if has_any:
             if len(params) < 2 or len(params) % 2 != 0:
                 response.update({"result": "any模式需要目标和值成对出现", "logs": logs})
@@ -477,10 +598,67 @@ def execute_command(
                 result_lines.append(f"[{uid}: 设置完成，匹配{matched}，修改{modified}]")
                 logs.append(_log_entry(command_label, modified, uid, "ok" if matched else "not found"))
 
+    elif action == "rank":
+        # rank 操作的参数处理
+        # 非 any 模式: 参数为 [limit]，默认 5
+        # any 模式: 参数为 [scope, limit]
+        if has_any:
+            if len(params) == 0:
+                scope = "%:%:%"
+                limit = 5
+            elif len(params) == 1:
+                scope = params[0]
+                limit = 5
+            else:
+                scope = params[0]
+                try:
+                    limit = int(params[1])
+                except ValueError:
+                    response["result"] = f"limit 必须是整数，得到: {params[1]}"
+                    return response
+            # 构建 any 模式的查询条件
+            parts = scope.split(":")
+            bid, gid, uid = (parts + ["", "", ""])[:3]
+            query: Dict[str, Any] = {}
+            if bid and bid != "%":
+                query["bot_id"] = bid
+            if gid and gid != "%":
+                query["group_id"] = gid
+            if uid and uid != "%":
+                query["user_id"] = uid
+        else:
+            # 非 any 模式，在当前 bot_id 和 group_id 下查询
+            query = {"bot_id": bot_id, "group_id": group_id}
+            if len(params) == 0:
+                limit = 5
+            else:
+                try:
+                    limit = int(params[0])
+                except ValueError:
+                    response["result"] = f"limit 必须是整数，得到: {params[0]}"
+                    return response
+
+        # 限制 limit 范围 [1, 30]
+        limit = max(1, min(30, limit))
+
+        # 执行 rank 查询
+        ranked_results = _apply_rank(mongo, query, type_key, field, limit)
+
+        if not ranked_results:
+            result_lines.append("未找到匹配的记录")
+        else:
+            for idx, (user_id, value) in enumerate(ranked_results, 1):
+                # 去除 user_id 和 value 两端的空白字符，防止数据库值包含换行符导致格式异常
+                clean_user_id = str(user_id).strip()
+                clean_value = str(value).strip()
+                result_lines.append(f"第 {idx} 名: 用户 {clean_user_id}, 值: {clean_value}")
+                logs.append(_log_entry(command_label, 1, clean_user_id, f"rank={idx}, value={clean_value}"))
+            total_queried = len(ranked_results)
+
     response.update({
         "result": "\n\n".join(result_lines) if result_lines else "无操作",
-        "modified_count": total_queried if action == "get" else total_modified,
-        "logs": logs,
+        "modified_count": total_queried if action in {"get", "rank"} else total_modified,
+        "logs": json.dumps(logs, ensure_ascii=False),
     })
     return response
 
