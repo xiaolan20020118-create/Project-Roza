@@ -32,6 +32,44 @@
 - `bot_config/`、`group_config/` 下的 `configs/` 目录存放实际 YAML；`*_standard`/`*_grand` 为模板或默认配置。
 - 导入时选择 `configs/` 目录，可一次性批量导入全部 YAML。
 
+## integrated_workflow.py 返回值结构
+
+`service/integrated_workflow.py` 的 `main()` 函数返回完整的字典，无论工作流在哪一步结束都包含所有字段。
+
+### 返回值完整列表
+
+| 字段名 | 类型 | 说明 |
+|-------|------|-----|
+| `stop_reason` | `str \| None` | 停止原因：`"finish"`（成功完成）/ `"block"`（黑名单拦截）/ `"input_exceeds_max_length"`（输入超长）/ `"overusage"`（超用量）/ `None`（进行中） |
+| `stop_message` | `str` | 停止时的提示消息，正常为空格 `" "` |
+| `bot_id` | `str` | 机器人 ID |
+| `group_id` | `str` | 群组 ID |
+| `user_id` | `str` | 用户 ID |
+| `user_query` | `str` | 用户输入的查询文本 |
+| `main_prompt` | `str` | 增强后的主提示词（经过各步骤拼接） |
+| `block_status` | `str` | 黑名单状态：`"pass"`（通过）/ `"block"`（被拦截） |
+| `input_length` | `int` | 用户输入的字符长度 |
+| `max_input_length` | `int` | 最大允许输入长度（0 表示无限制） |
+| `current_usage` | `int` | 当日已使用次数 |
+| `usage_limit` | `int` | 每日用量限制 |
+| `usage_date` | `str` | 用量日期（YYYYMMDD 格式） |
+| `favor_value` | `int` | 好感度值 |
+| `favor_prompt` | `str` | 好感度提示词 |
+| `persona_text` | `str` | 用户画像文本 |
+| `context_text` | `str` | 历史对话上下文文本 |
+| `context_count` | `int` | 提取的上下文条数 |
+| `hit_memories` | `list` | 命中的长期记忆条目列表 |
+
+### 工作流执行顺序
+
+1. **黑名单检查** → 可能终止（`stop_reason = "block"`）
+2. **输入长度检查** → 可能终止（`stop_reason = "input_exceeds_max_length"`）
+3. **用量限制检查** → 可能终止（`stop_reason = "overusage"`）
+4. **好感度提示词生成**
+5. **用户画像提示词生成**
+6. **上下文提示词生成**
+7. **长期记忆提示词生成** → 成功完成（`stop_reason = "finish"`）
+
 ## 快速上手
 
 1. 安装依赖（需 pymongo）。

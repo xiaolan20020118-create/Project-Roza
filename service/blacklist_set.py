@@ -4,19 +4,15 @@ from typing import Dict, Any
 
 
 class MongoDBSystem:
-    """统一的MongoDB系统 - 管理所有数据库操作"""
-    
+    """统一的MongoDB系统 - 管理所有数据库操作
+
+    注意: 索引由 integrated_workflow.py 统一创建，此处不再重复创建
+    """
+
     def __init__(self, mongo_url: str, db_name: str = "roza_database"):
         self.client = pymongo.MongoClient(mongo_url)
         self.db = self.client[db_name]
         self.collection = self.db["user_data"]
-        
-        # 创建复合索引，确保快速查询
-        self.collection.create_index([
-            ("bot_id", 1),
-            ("group_id", 1), 
-            ("user_id", 1)
-        ], unique=True)
 
 
 class BlacklistUpdater:
@@ -189,7 +185,7 @@ class BlacklistUpdater:
 
 
 def main(
-    blacklist_system: str,
+    blacklist_system: Any,
     warn_lifespan: str,
     warn_count: str,
     timestamp: float,
@@ -197,14 +193,14 @@ def main(
     group_id: str,
     user_id: str,
     MONGO_URL: str,
-    blacklist_cross_group: str,
+    blacklist_cross_group: Any,
     block_status: bool
 ) -> Dict[str, Any]:
     """
     黑名单状态更新主函数（新版本）
-    
+
     参数：
-    - blacklist_system: 黑名单系统开关 ("enable"/"disable")
+    - blacklist_system: 黑名单系统开关（整型 1/0）
     - warn_lifespan: 警告生命周期（秒，字符串）
     - warn_count: 警告次数阈值（字符串）
     - timestamp: 当前时间戳（浮点数）
@@ -212,25 +208,27 @@ def main(
     - group_id: 群组ID
     - user_id: 用户ID
     - MONGO_URL: MongoDB连接URL
-    - blacklist_cross_group: 是否跨群组更新 ("enable"/"disable")
+    - blacklist_cross_group: 是否跨群组更新（整型 1/0）
     - block_status: 当前状态（布尔：True=pass, False=block）
-    
+
     返回：
     - new_block_status: 更新后的状态（布尔）
     - block_count: 当前违规计数
+    - blacklist_cross_group: 跨群配置输出（整型 1/0）
     - block_message: 封禁消息
     - matched_count: 匹配的文档数量
     - modified_count: 修改的文档数量
     """
     
     # 如果黑名单系统被禁用，直接返回默认值
-    if blacklist_system == "disable":
+    if not blacklist_system:
         return {
-            "new_block_status": True,
-            "block_count": 0,
-            "block_message": " ",
-            "matched_count": 0,
-            "modified_count": 0
+            "new_block_status": True,  # type: bool
+            "block_count": 0,  # type: int
+            "blacklist_cross_group": 1 if blacklist_cross_group else 0,  # type: int
+            "block_message": " ",  # type: str
+            "matched_count": 0,  # type: int
+            "modified_count": 0  # type: int
         }
     
     # 初始化系统
@@ -267,7 +265,7 @@ def main(
     # 如果需要更新数据库
     if need_update:
         # 根据blacklist_cross_group判断更新范围
-        if blacklist_cross_group == "enable":
+        if blacklist_cross_group:
             # 跨群组更新
             update_result = blacklist_updater.update_blacklist_cross_group(
                 bot_id=bot_id,
@@ -293,9 +291,10 @@ def main(
     
     # 返回结果
     return {
-        "new_block_status": new_block_status,
-        "block_count": new_block_count,
-        "block_message": block_message,
-        "matched_count": matched_count,
-        "modified_count": modified_count
+        "new_block_status": new_block_status,  # type: bool
+        "block_count": new_block_count,  # type: int
+        "blacklist_cross_group": 1 if blacklist_cross_group else 0,  # type: int
+        "block_message": block_message,  # type: str
+        "matched_count": matched_count,  # type: int
+        "modified_count": modified_count  # type: int
     }

@@ -81,6 +81,10 @@ class MongoDBSystem:
     def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return self._user_data_collection.find_one(query)
 
+    def aggregate(self, pipeline: List[Dict[str, Any]]) -> pymongo.command_cursor.CommandCursor:
+        """执行聚合管道查询"""
+        return self._user_data_collection.aggregate(pipeline)
+
     def update_many(self, query: Dict[str, Any], updates: Dict[str, Any]) -> Tuple[int, int]:
         result = self._user_data_collection.update_many(query, {"$set": updates})
         return result.matched_count, result.modified_count
@@ -184,6 +188,20 @@ def _parse_list(block: str, key: str) -> List[str]:
     return items
 
 
+def _parse_bool(block: str, key: str) -> bool:
+    """
+    解析布尔类型的配置字段
+    支持格式: true/false, 1/0
+    返回 Python bool 类型
+    """
+    scalar = _parse_scalar(block, key).lower()
+    if scalar in ("true", "1"):
+        return True
+    if scalar in ("false", "0"):
+        return False
+    return False
+
+
 def _upsert_bot_configs(collection, yaml_text: str):
     for bot_id, group_id, block in _iter_units_with_key(yaml_text):
         if not bot_id:
@@ -223,29 +241,30 @@ def _upsert_group_configs(collection, yaml_text: str):
             # 群配置顺序参考 group_eg.yml
             "group_info": _parse_scalar(block, "group_info"),
             "operating_mode": _parse_scalar(block, "operating_mode"),
-            "favor_system": _parse_scalar(block, "favor_system"),
-            "favor_change_display": _parse_scalar(block, "favor_change_display"),
-            "favor_cross_group": _parse_scalar(block, "favor_cross_group"),
-            "persona_system": _parse_scalar(block, "persona_system"),
-            "persona_cross_group": _parse_scalar(block, "persona_cross_group"),
-            "usage_limit_system": _parse_scalar(block, "usage_limit_system"),
+            # 布尔字段使用 _parse_bool
+            "favor_system": _parse_bool(block, "favor_system"),
+            "favor_change_display": _parse_bool(block, "favor_change_display"),
+            "favor_cross_group": _parse_bool(block, "favor_cross_group"),
+            "persona_system": _parse_bool(block, "persona_system"),
+            "persona_cross_group": _parse_bool(block, "persona_cross_group"),
+            "usage_limit_system": _parse_bool(block, "usage_limit_system"),
             "usage_limit": _parse_scalar(block, "usage_limit"),
-            "usage_limit_cross_group": _parse_scalar(block, "usage_limit_cross_group"),
-            "usage_restrict_admin_users": _parse_scalar(block, "usage_restrict_admin_users"),
+            "usage_limit_cross_group": _parse_bool(block, "usage_limit_cross_group"),
+            "usage_restrict_admin_users": _parse_bool(block, "usage_restrict_admin_users"),
             "max_input_size": _parse_scalar(block, "max_input_size"),
-            "memory_system": _parse_scalar(block, "memory_system"),
+            "memory_system": _parse_bool(block, "memory_system"),
             "memory_retrieval_number": _parse_scalar(block, "memory_retrieval_number"),
-            "context_system": _parse_scalar(block, "context_system"),
+            "context_system": _parse_bool(block, "context_system"),
             "context_pool_size": _parse_scalar(block, "context_pool_size"),
-            "commonsense_system": _parse_scalar(block, "commonsense_system"),
-            "commonsense_cross_group": _parse_scalar(block, "commonsense_cross_group"),
-            "blacklist_system": _parse_scalar(block, "blacklist_system"),
+            "commonsense_system": _parse_bool(block, "commonsense_system"),
+            "commonsense_cross_group": _parse_bool(block, "commonsense_cross_group"),
+            "blacklist_system": _parse_bool(block, "blacklist_system"),
             "warn_count": _parse_scalar(block, "warn_count"),
             "warn_lifespan": _parse_scalar(block, "warn_lifespan"),
             "block_lifespan": _parse_scalar(block, "block_lifespan"),
-            "blacklist_cross_group": _parse_scalar(block, "blacklist_cross_group"),
-            "blacklist_restrict_admin_users": _parse_scalar(block, "blacklist_restrict_admin_users"),
-            "independent_review_system": _parse_scalar(block, "independent_review_system"),
+            "blacklist_cross_group": _parse_bool(block, "blacklist_cross_group"),
+            "blacklist_restrict_admin_users": _parse_bool(block, "blacklist_restrict_admin_users"),
+            "independent_review_system": _parse_bool(block, "independent_review_system"),
         }
         collection.update_one({"bot_id": bot_id, "group_id": group_id}, {"$set": doc}, upsert=True)
 
@@ -654,30 +673,49 @@ def _apply_set(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field
 
 
 def _apply_rank(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field: str, limit: int) -> List[Tuple[str, Any]]:
-    """对指定字段进行排序，返回前N个结果"""
-    docs = mongo.find(query)
+    """对指定字段进行排序，返回前N个结果
 
+    使用 MongoDB 原生排序功能，避免加载全部数据到内存中排序。
+    """
     results = []
-    for doc in docs:
-        user_id = str(doc.get("user_id", "")).strip()
-        raw_value = _get_nested(doc, field)
 
-        if raw_value is None:
-            numeric_value = 0
-        elif isinstance(raw_value, (int, float)):
-            numeric_value = raw_value
-        elif isinstance(raw_value, list):
-            numeric_value = len(raw_value)
-        else:
-            try:
-                numeric_value = float(str(raw_value).strip())
-            except (ValueError, TypeError):
+    if field == "history_entries":
+        # 数组类型：使用聚合管道按数组长度排序
+        pipeline = [
+            {"$match": query},
+            {"$addFields": {"_sort_value": {"$size": "$history_entries"}}},
+            {"$sort": {"_sort_value": -1}},
+            {"$limit": limit},
+            {"$project": {"user_id": 1, "_sort_value": 1}}
+        ]
+        for doc in mongo.aggregate(pipeline):
+            user_id = str(doc.get("user_id", "")).strip()
+            results.append((user_id, doc.get("_sort_value", 0)))
+    else:
+        # 数值类型（包括嵌套字段如 total_usage.total_tokens）
+        # MongoDB 原生支持嵌套字段排序，直接在数据库层面完成排序和截断
+        for doc in mongo._user_data_collection.find(query).sort(field, -1).limit(limit):
+            user_id = str(doc.get("user_id", "")).strip()
+            raw_value = _get_nested(doc, field)
+
+            # 处理不同类型的值
+            if raw_value is None:
                 numeric_value = 0
+            elif isinstance(raw_value, (int, float)):
+                numeric_value = raw_value
+            elif isinstance(raw_value, list):
+                # 兼容处理：如果实际数据是数组，使用长度
+                numeric_value = len(raw_value)
+            else:
+                # 字符串类型转换
+                try:
+                    numeric_value = float(str(raw_value).strip())
+                except (ValueError, TypeError):
+                    numeric_value = 0
 
-        results.append((user_id, numeric_value))
+            results.append((user_id, numeric_value))
 
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results[:limit]
+    return results
 
 
 # =============================================================================

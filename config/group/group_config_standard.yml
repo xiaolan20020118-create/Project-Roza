@@ -2,26 +2,26 @@
   group_id: "这里是该配置应用的群号"
   group_info: "这里填写当前群聊的基本信息，比如群名称、成员身份等"
   operating_mode: "chat"
-  favor_system: "enable"
-  favor_change_display: "disable"
-  favor_cross_group: "enable"
-  persona_system: "disable"
-  persona_cross_group: "enable"
-  usage_limit_system: "enable"
+  favor_system: true
+  favor_change_display: false
+  favor_cross_group: true
+  persona_system: false
+  persona_cross_group: true
+  usage_limit_system: true
   usage_limit: "300"
-  usage_limit_cross_group: "disable"
-  usage_restrict_admin_users: "disable"
+  usage_limit_cross_group: false
+  usage_restrict_admin_users: false
   max_input_size: "500"
-  memory_system: "disable"
+  memory_system: false
   memory_retrieval_number: "8"
-  commonsense_system: "enable"
-  commonsense_cross_group: "disable"
-  context_system: "enable"
+  commonsense_system: true
+  commonsense_cross_group: false
+  context_system: true
   context_pool_size: "8"
-  blacklist_system: "enable"
+  blacklist_system: true
   warn_count: "4"
   warn_lifespan: "300"#单次警告的生命周期，秒为单位
   block_lifespan: "3600"#屏蔽时长，秒为单位
-  blacklist_cross_group: "enable"
-  blacklist_restrict_admin_users: "disable"
-  independent_review_system: "disable"
+  blacklist_cross_group: true
+  blacklist_restrict_admin_users: false
+  independent_review_system: false

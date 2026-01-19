@@ -5,7 +5,7 @@ import json
 import math
 import random
 from collections import Counter
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, Union
 
 
 class MongoDBSystem:
@@ -24,31 +24,31 @@ class MongoDBSystem:
             ("bot_id", 1),
             ("group_id", 1),
             ("user_id", 1)
-        ], unique=True)
+        ], unique=True, name="idx_user_data")
 
-        # 跨群配置（默认值）
-        self._favor_cross_group = "disable"
-        self._persona_cross_group = "disable"
-        self._blacklist_cross_group = "disable"
-        self._usage_limit_cross_group = "disable"
+        # 跨群配置（默认值，使用布尔类型）
+        self._favor_cross_group: bool = False
+        self._persona_cross_group: bool = False
+        self._blacklist_cross_group: bool = False
+        self._usage_limit_cross_group: bool = False
 
-    def set_cross_group_config(self, favor_cross_group: str = "disable",
-                               persona_cross_group: str = "disable",
-                               blacklist_cross_group: str = "disable",
-                               usage_limit_cross_group: str = "disable"):
+    def set_cross_group_config(self, favor_cross_group: Any = False,
+                               persona_cross_group: Any = False,
+                               blacklist_cross_group: Any = False,
+                               usage_limit_cross_group: Any = False):
         """
         设置跨群配置参数
 
         参数：
-            favor_cross_group: 好感度是否跨群
+            favor_cross_group: 好感度是否跨群（支持bool/int，自动转换为bool）
             persona_cross_group: 用户画像是否跨群
             blacklist_cross_group: 黑名单是否跨群
             usage_limit_cross_group: 用量统计是否跨群
         """
-        self._favor_cross_group = favor_cross_group
-        self._persona_cross_group = persona_cross_group
-        self._blacklist_cross_group = blacklist_cross_group
-        self._usage_limit_cross_group = usage_limit_cross_group
+        self._favor_cross_group = bool(favor_cross_group)
+        self._persona_cross_group = bool(persona_cross_group)
+        self._blacklist_cross_group = bool(blacklist_cross_group)
+        self._usage_limit_cross_group = bool(usage_limit_cross_group)
 
     def _get_default_persona_attributes(self) -> Dict[str, str]:
         """获取默认的用户画像属性"""
@@ -215,8 +215,8 @@ class MongoDBSystem:
         返回：构建的新文档
         """
         # 从模板继承或使用默认值的辅助函数
-        def get_value(field_name: str, default_value: Any, cross_group_enabled: str) -> Any:
-            if template_doc and cross_group_enabled == "enable":
+        def get_value(field_name: str, default_value: Any, cross_group_enabled: bool) -> Any:
+            if template_doc and cross_group_enabled:
                 return template_doc.get(field_name, default_value)
             return default_value
 
@@ -280,134 +280,11 @@ class MongoDBSystem:
         document = self.get_document(bot_id, group_id, user_id)
         return document.get(field_name)
     
-    def update_field(self, bot_id: str, group_id: str, user_id: str, 
+    def update_field(self, bot_id: str, group_id: str, user_id: str,
                     field_name: str, new_value: Any) -> Any:
         """更新指定字段"""
         updates = {field_name: new_value}
         return self.update_document(bot_id, group_id, user_id, updates)
-    
-    def process_and_update_field(self, bot_id: str, group_id: str, user_id: str,
-                                field_name: str, process_function) -> Dict[str, Any]:
-        """通用字段处理函数：提取→处理→更新"""
-        current_value = self.get_field(bot_id, group_id, user_id, field_name)
-        processed_value = process_function(current_value)
-        result = self.update_field(bot_id, group_id, user_id, field_name, processed_value)
-
-        return {
-            "original_value": current_value,
-            "processed_value": processed_value,
-            "update_status": "success" if result.acknowledged else "failed",
-            "matched_count": result.matched_count,
-            "modified_count": result.modified_count
-        }
-
-    def get_full_document_schema(self) -> Dict[str, Any]:
-        """
-        获取完整的用户数据文档结构定义（仅用于参考，不影响实际功能）
-
-        字段对应关系：
-        - favor: favor_value + last_favor_change（受favor_cross_group影响）
-        - usage: total_usage字典（4个字段，各群独立）+ daily_usage_count（受usage_limit_cross_group影响）
-        - memory: long_term_memory（各群独立）
-        - context: history_entries前N条（各群独立）
-        - persona: persona_attributes全部字段（受persona_cross_group影响）
-        - blacklist: block_stats全部字段（受blacklist_cross_group影响）
-
-        表结构字段对应关系：
-        - bot_id: 机器人ID（索引字段）
-        - group_id: 群组ID（索引字段，9999为跨群模板）
-        - user_id: 用户ID（索引字段）
-
-        跨群字段（存储在9999模板中）：
-        - favor相关（受favor_cross_group影响）：
-          ├─ favor_value: 好感度值（整数）
-          └─ last_favor_change: 最后一次好感度变化量（整数）
-        - persona相关（受persona_cross_group影响）：
-          └─ persona_attributes: 用户画像属性（字典）
-              ├─ basic_info: 基本信息
-              ├─ living_habits: 生活习惯
-              ├─ psychological_traits: 心理特征
-              ├─ interests_preferences: 兴趣偏好
-              ├─ dislikes: 反感点
-              ├─ ai_expectations: 对AI的期望
-              └─ memory_points: 希望记住的信息
-        - blacklist相关（受blacklist_cross_group影响）：
-          └─ block_stats: 黑名单状态（字典）
-              ├─ block_status: 封禁状态（True=pass, False=block）
-              ├─ block_count: 违规计数（整数）
-              └─ last_operate_time: 最后操作时间（ISO格式字符串）
-        - usage相关中受usage_limit_cross_group影响的字段：
-          └─ daily_usage_count: 每日使用量计数（整数，每日重置）
-
-        非跨群字段（每个群组独立）：
-        - memory相关：
-          └─ long_term_memory: 长期记忆数组（数组）
-        - context相关：
-          ├─ history_entries: 历史对话记录数组（数组）
-          └─ history_stats: 历史统计（字典）
-              └─ total_histories: 总历史条目数（整数）
-        - usage相关中各群独立的字段：
-          └─ total_usage: 总使用量统计（字典）
-              ├─ total_chat_count: 总对话次数（整数）
-              ├─ total_tokens: 总token数（整数）
-              ├─ total_prompt_token: 总输入token数（整数）
-              └─ total_output_token: 总输出token数（整数）
-
-        系统字段：
-        - created_at: 创建时间（ISO格式字符串）
-        - updated_at: 更新时间（ISO格式字符串）
-
-        返回：表结构定义字典
-        """
-        current_time = datetime.utcnow()
-        return {
-            # 索引字段
-            "bot_id": "机器人ID（字符串）",
-            "group_id": "群组ID（字符串），9999为跨群模板文档",
-            "user_id": "用户ID（字符串）",
-
-            # favor相关（受favor_cross_group影响）
-            "favor_value": "好感度值（整数，默认0）",
-            "last_favor_change": "最后一次好感度变化量（整数，默认0）",
-
-            # persona相关（受persona_cross_group影响）
-            "persona_attributes": {
-                "basic_info": "基本信息（字符串，默认空）",
-                "living_habits": "生活习惯（字符串，默认空）",
-                "psychological_traits": "心理特征（字符串，默认空）",
-                "interests_preferences": "兴趣偏好（字符串，默认空）",
-                "dislikes": "反感点（字符串，默认空）",
-                "ai_expectations": "对AI的期望（字符串，默认空）",
-                "memory_points": "希望记住的信息（字符串，默认空）",
-            },
-
-            # blacklist相关（受blacklist_cross_group影响）
-            "block_stats": {
-                "block_status": "封禁状态（布尔，True=pass, False=block，默认True）",
-                "block_count": "违规计数（整数，默认0）",
-                "last_operate_time": f"最后操作时间（ISO格式字符串，示例：{current_time.isoformat()}）",
-            },
-
-            # usage相关（部分受usage_limit_cross_group影响）
-            "daily_usage_count": "每日使用量计数（整数，默认0，每日重置，受usage_limit_cross_group影响）",
-            "total_usage": {
-                "total_chat_count": "总对话次数（整数，默认0，各群独立）",
-                "total_tokens": "总token数（整数，默认0，各群独立）",
-                "total_prompt_token": "总输入token数（整数，默认0，各群独立）",
-                "total_output_token": "总输出token数（整数，默认0，各群独立）",
-            },
-
-            # 非跨群字段（各群独立）
-            "long_term_memory": "长期记忆数组（数组，默认空）",
-            "history_entries": "历史对话记录数组（数组，默认空）",
-            "history_stats": {
-                "total_histories": "总历史条目数（整数，默认0）",
-            },
-
-            # 系统字段
-            "created_at": f"创建时间（ISO格式字符串，示例：{current_time.isoformat()}）",
-            "updated_at": f"更新时间（ISO格式字符串，示例：{current_time.isoformat()}）",
-        }
 
 
 class UtilityFunctions:
@@ -1046,466 +923,229 @@ class IntegratedWorkflow:
         self.context_manager = ContextManager(self.mongo_system)
         self.memory_manager = MemoryManager(self.mongo_system)
         self.util = UtilityFunctions()
-    
-    def step_1_blacklist_check(self, 
-                               bot_id: str,
-                               group_id: str,
-                               user_id: str,
-                               blacklist_system: str,
-                               is_user_admin: str,
-                               blacklist_restrict_admin_users: str,
-                               warn_lifespan: str,
-                               block_lifespan: str,
-                               timestamp: float) -> Dict[str, Any]:
-        """
-        第1步：黑名单检查
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - blacklist_system: 黑名单系统开关 ("enable"/"disable")
-        - is_user_admin: 用户是否是管理员 ("true"/"false" 字符串)
-        - blacklist_restrict_admin_users: 是否限制管理员 ("enable"/"disable")
-        - warn_lifespan: 警告生命周期（秒）
-        - block_lifespan: 封锁生命周期（秒）
-        - timestamp: 当前时间戳
-        
-        返回：
-        - continue_to_step_2: 是否继续到第2步
-        - stop_reason: 停止原因（如果停止的话）
-        - stop_message: 停止消息
-        - block_status: 当前状态 (pass/warn/block)
-        - matched_count: 匹配数量
-        - modified_count: 修改数量
-        """
-        
+
+    def _init_context(self, bot_id: str, group_id: str, user_id: str,
+                      user_query: str, main_prompt: str) -> Dict[str, Any]:
+        """初始化工作流上下文，设置所有字段的默认值"""
+        return {
+            # 工作流状态
+            "stop_reason": None,
+            "stop_message": " ",
+            # 用户标识
+            "bot_id": bot_id,
+            "group_id": group_id,
+            "user_id": user_id,
+            # 输入
+            "user_query": user_query,
+            # 输出
+            "main_prompt": main_prompt,
+            # 步骤1：黑名单检查结果
+            "block_status": "pass",
+            # 步骤2：输入长度检查结果
+            "input_length": 0,
+            "max_input_length": 0,
+            # 步骤3：用量限制检查结果
+            "current_usage": 0,
+            "usage_limit": 0,
+            "usage_date": "",
+            # 步骤4：好感度结果
+            "favor_value": 0,
+            "favor_prompt": "",
+            # 步骤5：用户画像结果
+            "persona_text": "",
+            # 步骤6：上下文结果
+            "context_text": "",
+            "context_count": 0,
+            # 步骤7：记忆结果
+            "hit_memories": [],
+        }
+
+    def check_blacklist(self, context: Dict[str, Any],
+                       blacklist_system: Any, is_user_admin: Any,
+                       blacklist_restrict_admin_users: Any,
+                       warn_lifespan: str, block_lifespan: str,
+                       timestamp: float) -> Dict[str, Any]:
+        """黑名单检查"""
         # 判断是否需要执行黑名单检查
-        skip_blacklist_check = False
-        
-        # 条件1：黑名单系统被禁用
-        if blacklist_system == "disable":
-            skip_blacklist_check = True
-        
-        # 条件2：黑名单系统启用 且 不限制管理员 且 用户是管理员
-        if (blacklist_system == "enable" and 
-            blacklist_restrict_admin_users == "disable" and 
-            is_user_admin == "true"):
-            skip_blacklist_check = True
-        
-        # 如果跳过黑名单检查，直接进入第2步
-        if skip_blacklist_check:
-            return {
-                "continue_to_step_2": True,
-                "stop_reason": None,
-                "stop_message": " ",
-                "block_status": "pass",
-                "matched_count": 0,
-                "modified_count": 0
-            }
-        
-        # 执行分支1.A：黑名单检查
+        skip_check = (
+            not blacklist_system or
+            (blacklist_system and
+             not blacklist_restrict_admin_users and
+             is_user_admin)
+        )
+
+        if skip_check:
+            return context
+
+        # 执行黑名单检查
         warn_lifespan_int = self.util.safe_int_convert(warn_lifespan, 0)
         block_lifespan_int = self.util.safe_int_convert(block_lifespan, 0)
-        
+
         check_result = self.blacklist_manager.check_blacklist_status(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
             warn_lifespan=warn_lifespan_int,
             block_lifespan=block_lifespan_int,
             timestamp=timestamp
         )
-        
-        allow_continue = check_result["allow_continue"]
-        block_status = check_result["block_status"]
-        
-        # 判断是否继续到第2步（基于allow_continue）
-        if allow_continue:
-            return {
-                "continue_to_step_2": True,
-                "stop_reason": None,
-                "stop_message": check_result["stop_message"],
-                "block_status": block_status,
-                "matched_count": check_result["matched_count"],
-                "modified_count": check_result["modified_count"]
-            }
-        else:
-            # 停止程序
-            return {
-                "continue_to_step_2": False,
-                "stop_reason": "block",
-                "stop_message": check_result["stop_message"],
-                "block_status": block_status,
-                "matched_count": check_result["matched_count"],
-                "modified_count": check_result["modified_count"]
-            }
-    
-    def step_2_input_length_check(self,
-                                  user_query: str,
-                                  max_input_size: str,
-                                  overinput_output: Any = None) -> Dict[str, Any]:
-        """
-        第2步：输入长度检查
-        
-        输入：
-        - user_query: 用户查询字符串
-        - max_input_size: 最大输入长度限制（字符串）
-        
-        返回：
-        - continue_to_step_3: 是否继续到第3步
-        - stop_reason: 停止原因（如果停止的话）
-        - stop_message: 停止消息
-        - input_length: 实际输入长度
-        - max_length: 最大长度限制
-        """
-        
-        
-        
-        # 转换max_input_size为整型
+
+        # 更新 context
+        context["block_status"] = "pass" if check_result["block_status"] else "block"
+
+        if not check_result["allow_continue"]:
+            context["stop_reason"] = "block"
+            context["stop_message"] = check_result["stop_message"]
+
+        return context
+
+    def check_input_length(self, context: Dict[str, Any],
+                          max_input_size: str,
+                          overinput_output: Any = None) -> Dict[str, Any]:
+        """输入长度检查"""
         max_length = self.util.safe_int_convert(max_input_size, 0)
-        
-        # 计算user_query的长度
-        input_length = len(user_query) if user_query else 0
-        
+        input_length = len(context["user_query"]) if context["user_query"] else 0
+
+        context["input_length"] = input_length
+        context["max_input_length"] = max_length
+
         # 判断是否满足长度要求
-        # 条件：输入长度 < 长度限制 或者 长度限制为0（表示无限制）
-        if input_length < max_length or max_length == 0:
-            # 满足条件，继续到第3步
-            return {
-                "continue_to_step_3": True,
-                "stop_reason": None,
-                "stop_message": " ",
-                "input_length": input_length,
-                "max_length": max_length
-            }
-        else:
-            # 不满足条件，终止程序
-            stop_message = self.util.random_message(overinput_output) if overinput_output else "这么长谁看的过来啦……"
-            return {
-                "continue_to_step_3": False,
-                "stop_reason": "input_exceeds_max_length",
-                "stop_message": stop_message,
-                "input_length": input_length,
-                "max_length": max_length
-            }
-    
-    def step_3_usage_limit_check(self,
-                                 bot_id: str,
-                                 group_id: str,
-                                 user_id: str,
-                                 usage_limit_system: str,
-                                 usage_restrict_admin_users: str,
-                                 is_user_admin: str,
-                                 usage_limit: str,
-                                 year: str,
-                                 month: str,
-                                 day: str,
-                                 overusage_output: Any) -> Dict[str, Any]:
-        """
-        第3步：用量限制检查
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - usage_limit_system: 用量限制系统开关 ("enable"/"disable")
-        - usage_restrict_admin_users: 是否限制管理员 ("enable"/"disable")
-        - is_user_admin: 用户是否是管理员 ("true"/"false" 字符串)
-        - usage_limit: 每日用量限制（字符串）
-        - year, month, day: 当前日期
-        - overusage_output: 超限时的提示消息（字符串或字符串数组）
-        
-        返回：
-        - continue_to_step_4: 是否继续到第4步
-        - stop_reason: 停止原因（如果停止的话）
-        - stop_message: 停止消息
-        - usage_info: 用量信息
-        - matched_count: 匹配数量
-        - modified_count: 修改数量
-        """
-        
+        if input_length >= max_length and max_length > 0:
+            context["stop_reason"] = "input_exceeds_max_length"
+            context["stop_message"] = self.util.random_message(overinput_output) if overinput_output else "这么长谁看的过来啦……"
+
+        return context
+
+    def check_usage_limit(self, context: Dict[str, Any],
+                         usage_limit_system: Any, usage_restrict_admin_users: Any,
+                         is_user_admin: Any, usage_limit: str,
+                         year: str, month: str, day: str,
+                         overusage_output: Any) -> Dict[str, Any]:
+        """用量限制检查"""
         # 判断是否需要执行用量限制检查
-        skip_usage_check = False
-        
-        # 条件1：用量限制系统被禁用
-        if usage_limit_system == "disable":
-            skip_usage_check = True
-        
-        # 条件2：用量限制系统启用 且 不限制管理员 且 用户是管理员
-        if (usage_limit_system == "enable" and 
-            usage_restrict_admin_users == "disable" and 
-            is_user_admin == "true"):
-            skip_usage_check = True
-        
-        # 如果跳过用量限制检查，直接进入第4步
-        if skip_usage_check:
-            return {
-                "continue_to_step_4": True,
-                "stop_reason": None,
-                "stop_message": " ",
-                "usage_info": {
-                    "current_usage": 0,
-                    "usage_limit": 0,
-                    "date": f"{year}{month}{day}"
-                },
-                "matched_count": 0,
-                "modified_count": 0
-            }
-        
-        # 执行分支3.A：用量限制检查
+        skip_check = (
+            not usage_limit_system or
+            (usage_limit_system and
+             not usage_restrict_admin_users and
+             is_user_admin)
+        )
+
+        if skip_check:
+            return context
+
         usage_limit_int = self.util.safe_int_convert(usage_limit, 0)
-        
+
         check_result = self.usage_limit_manager.check_usage_limit(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
             usage_limit=usage_limit_int,
             year=year,
             month=month,
             day=day,
             overusage_output=overusage_output
         )
-        
-        # 判断是否继续到第4步
-        if check_result["allow_continue"]:
-            return {
-                "continue_to_step_4": True,
-                "stop_reason": None,
-                "stop_message": check_result["stop_message"],
-                "usage_info": {
-                    "current_usage": check_result["new_usage_count"],
-                    "usage_limit": check_result["usage_limit"],
-                    "date": check_result["new_request_date"]
-                },
-                "matched_count": check_result["matched_count"],
-                "modified_count": check_result["modified_count"]
-            }
-        else:
-            # 停止程序
-            return {
-                "continue_to_step_4": False,
-                "stop_reason": "overusage",
-                "stop_message": check_result["stop_message"],
-                "usage_info": {
-                    "current_usage": check_result["new_usage_count"],
-                    "usage_limit": check_result["usage_limit"],
-                    "date": check_result["new_request_date"]
-                },
-                "matched_count": check_result["matched_count"],
-                "modified_count": check_result["modified_count"]
-            }
-    
-    def step_4_favor_prompt(self,
-                           bot_id: str,
-                           group_id: str,
-                           user_id: str,
-                           favor_system: str,
-                           favor_prompts: Optional[List[str]],
-                           favor_split_points: Optional[List[int]],
-                           main_prompt: str) -> Dict[str, Any]:
-        """
-        第4步：好感度提示词生成
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - favor_system: 好感度系统开关 ("enable"/"disable")
-        - favor_prompts: 好感度提示词数组
-        - favor_split_points: 分割点整型数组
-        - main_prompt: 主提示词
-        
-        返回：
-        - continue_to_step_5: 是否继续到第5步
-        - favor_value: 用户好感度值
-        - favor_prompt: 好感度提示词
-        - enhanced_main_prompt: 增强后的主提示词
-        """
-        
-        # 判断是否需要执行好感度系统
-        if favor_system == "disable":
-            # 好感度系统被禁用，直接进入第5步
-            return {
-                "continue_to_step_5": True,
-                "favor_value": 0,
-                "favor_prompt": "",
-                "enhanced_main_prompt": main_prompt
-            }
-        
-        # 执行分支4.A：好感度提示词生成
+
+        # 更新 context
+        context["current_usage"] = check_result["new_usage_count"]
+        context["usage_limit"] = check_result["usage_limit"]
+        context["usage_date"] = check_result["new_request_date"]
+
+        if not check_result["allow_continue"]:
+            context["stop_reason"] = "overusage"
+            context["stop_message"] = check_result["stop_message"]
+
+        return context
+
+    def generate_favor_prompt(self, context: Dict[str, Any],
+                             favor_system: Any,
+                             favor_prompts: Optional[List[str]],
+                             favor_split_points: Optional[List[int]]) -> Dict[str, Any]:
+        """好感度提示词生成"""
+        if not favor_system:
+            return context
+
         prompts = favor_prompts or []
         split_points = favor_split_points or []
-        
+
         result = self.favor_manager.get_favor_prompt(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
             prompts=prompts,
             split_points=split_points,
-            main_prompt=main_prompt
+            main_prompt=context["main_prompt"]
         )
-        
-        return {
-            "continue_to_step_5": True,
-            "favor_value": result["favor_value"],
-            "favor_prompt": result["favor_prompt"],
-            "enhanced_main_prompt": result["enhanced_main_prompt"]
-        }
-    
-    def step_5_persona_prompt(self,
-                             bot_id: str,
-                             group_id: str,
-                             user_id: str,
-                             persona_system: str,
-                             main_prompt: str) -> Dict[str, Any]:
-        """
-        第5步：用户画像提示词生成
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - persona_system: 用户画像系统开关 ("enable"/"disable")
-        - main_prompt: 主提示词（可能已经包含好感度提示词）
-        
-        返回：
-        - continue_to_step_6: 是否继续到第6步
-        - persona_text: 用户画像文本
-        - enhanced_main_prompt: 增强后的主提示词
-        """
-        
-        # 判断是否需要执行用户画像系统
-        if persona_system == "disable":
-            # 用户画像系统被禁用，直接进入第6步
-            return {
-                "continue_to_step_6": True,
-                "persona_text": "",
-                "enhanced_main_prompt": main_prompt
-            }
-        
-        # 执行分支5.A：用户画像提示词生成
+
+        context["favor_value"] = result["favor_value"]
+        context["favor_prompt"] = result["favor_prompt"]
+        context["main_prompt"] = result["enhanced_main_prompt"]
+
+        return context
+
+    def generate_persona_prompt(self, context: Dict[str, Any],
+                              persona_system: Any) -> Dict[str, Any]:
+        """用户画像提示词生成"""
+        if not persona_system:
+            return context
+
         result = self.persona_manager.get_persona_prompt(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
-            main_prompt=main_prompt
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
+            main_prompt=context["main_prompt"]
         )
-        
-        return {
-            "continue_to_step_6": True,
-            "persona_text": result["persona_text"],
-            "enhanced_main_prompt": result["enhanced_main_prompt"]
-        }
-    
-    def step_6_context_prompt(self,
-                             bot_id: str,
-                             group_id: str,
-                             user_id: str,
-                             context_system: str,
-                             context_pool_size: str,
-                             main_prompt: str) -> Dict[str, Any]:
-        """
-        第6步：上下文提示词生成
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - context_system: 上下文系统开关 ("enable"/"disable")
-        - context_pool_size: 上下文池大小（字符串形式的数字）
-        - main_prompt: 主提示词（可能已经包含好感度和用户画像提示词）
-        
-        返回：
-        - continue_to_step_7: 是否继续到第7步
-        - context_text: 上下文文本
-        - enhanced_main_prompt: 增强后的主提示词
-        """
-        
-        # 判断是否需要执行上下文系统
-        if context_system == "disable":
-            # 上下文系统被禁用，直接进入第7步
-            return {
-                "continue_to_step_7": True,
-                "context_text": "",
-                "enhanced_main_prompt": main_prompt
-            }
-        
-        # 执行分支6.A：上下文提示词生成
-        # 转换context_pool_size为整型
+
+        context["persona_text"] = result["persona_text"]
+        context["main_prompt"] = result["enhanced_main_prompt"]
+
+        return context
+
+    def generate_context_prompt(self, context: Dict[str, Any],
+                               context_system: Any,
+                               context_pool_size: str) -> Dict[str, Any]:
+        """上下文提示词生成"""
+        if not context_system:
+            return context
+
         pool_size = self.util.safe_int_convert(context_pool_size, 0)
-        
+
         result = self.context_manager.get_context_prompt(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
             context_pool_size=pool_size,
-            main_prompt=main_prompt
+            main_prompt=context["main_prompt"]
         )
-        
-        return {
-            "continue_to_step_7": True,
-            "context_text": result["context_text"],
-            "context_count": result["context_count"],
-            "enhanced_main_prompt": result["enhanced_main_prompt"]
-        }
-    
-    def step_7_memory_prompt(self,
-                            bot_id: str,
-                            group_id: str,
-                            user_id: str,
-                            memory_system: str,
-                            user_query: str,
-                            memory_retrieval_number: str,
-                            main_prompt: str) -> Dict[str, Any]:
-        """
-        第7步：长期记忆提示词生成（最后一步）
-        
-        输入：
-        - bot_id: 机器人ID
-        - group_id: 群组ID
-        - user_id: 用户ID
-        - memory_system: 长期记忆系统开关 ("enable"/"disable")
-        - user_query: 用户查询内容
-        - memory_retrieval_number: 记忆检索数量（字符串形式的数字）
-        - main_prompt: 主提示词（可能已经包含好感度、用户画像、上下文提示词）
-        
-        返回：
-        - stop_reason: "finish" - 表示工作流完成
-        - stop_message: " " - 空格字符串
-        - hit_memories: 命中的记忆条目列表
-        - enhanced_main_prompt: 最终的增强主提示词
-        """
-        
-        # 判断是否需要执行长期记忆系统
-        if memory_system == "disable":
-            # 长期记忆系统被禁用，程序结束
-            return {
-                "stop_reason": "finish",
-                "stop_message": " ",
-                "hit_memories": [],
-                "enhanced_main_prompt": main_prompt
-            }
-        
-        # 执行分支7.A：长期记忆检索
-        # 转换memory_retrieval_number为整型
+
+        context["context_text"] = result["context_text"]
+        context["context_count"] = result["context_count"]
+        context["main_prompt"] = result["enhanced_main_prompt"]
+
+        return context
+
+    def generate_memory_prompt(self, context: Dict[str, Any],
+                             memory_system: Any,
+                             memory_retrieval_number: str) -> Dict[str, Any]:
+        """长期记忆提示词生成"""
+        if not memory_system:
+            return context
+
         retrieval_num = self.util.safe_int_convert(memory_retrieval_number, 5)
-        
+
         result = self.memory_manager.get_memory_prompt(
-            bot_id=bot_id,
-            group_id=group_id,
-            user_id=user_id,
-            user_query=user_query,
-            main_prompt=main_prompt,
+            bot_id=context["bot_id"],
+            group_id=context["group_id"],
+            user_id=context["user_id"],
+            user_query=context["user_query"],
+            main_prompt=context["main_prompt"],
             memory_retrieval_number=retrieval_num
         )
-        
-        return {
-            "stop_reason": "finish",
-            "stop_message": " ",
-            "hit_memories": result["hit_memories"],
-            "enhanced_main_prompt": result["enhanced_main_prompt"]
-        }
+
+        context["hit_memories"] = result["hit_memories"]
+        context["main_prompt"] = result["enhanced_main_prompt"]
+
+        return context
 
 
 def main(
@@ -1517,51 +1157,51 @@ def main(
     main_prompt: str,
     MONGO_URL: str,
 
-    # 跨群配置参数（用于9999模板继承逻辑）
-    favor_cross_group: str = "disable",
-    persona_cross_group: str = "disable",
-    blacklist_cross_group: str = "disable",
-    usage_limit_cross_group: str = "disable",
+    # 跨群配置参数（支持bool/str/int，自动转换为bool内部处理）
+    favor_cross_group: Any = False,
+    persona_cross_group: Any = False,
+    blacklist_cross_group: Any = False,
+    usage_limit_cross_group: Any = False,
 
-    # 第1步：黑名单检查参数
-    blacklist_system: str = "disable",
-    is_user_admin: str = "false",
-    blacklist_restrict_admin_users: str = "disable",
+    # 黑名单检查参数
+    blacklist_system: Any = 0,
+    is_user_admin: Any = 0,
+    blacklist_restrict_admin_users: Any = 0,
     warn_lifespan: str = "0",
     block_lifespan: str = "0",
     timestamp: float = 0.0,
 
-    # 第2步：输入长度检查参数
+    # 输入长度检查参数
     max_input_size: str = "0",
     overinput_output: Any = None,
 
-    # 第3步：用量限制检查参数
-    usage_limit_system: str = "disable",
-    usage_restrict_admin_users: str = "disable",
+    # 用量限制检查参数
+    usage_limit_system: Any = 0,
+    usage_restrict_admin_users: Any = 0,
     usage_limit: str = "0",
     year: str = "1970",
     month: str = "01",
     day: str = "01",
     overusage_output: Any = None,
 
-    # 第4步：好感度提示词参数
-    favor_system: str = "disable",
+    # 好感度提示词参数
+    favor_system: Any = 0,
     favor_prompts: Optional[List[str]] = None,
     favor_split_points: Optional[List[int]] = None,
 
-    # 第5步：用户画像提示词参数
-    persona_system: str = "disable",
+    # 用户画像提示词参数
+    persona_system: Any = 0,
 
-    # 第6步：上下文提示词参数
-    context_system: str = "disable",
+    # 上下文提示词参数
+    context_system: Any = 0,
     context_pool_size: str = "0",
 
-    # 第7步：长期记忆提示词参数
-    memory_system: str = "disable",
+    # 长期记忆提示词参数
+    memory_system: Any = 0,
     memory_retrieval_number: str = "5"
 ) -> Dict[str, Any]:
     """
-    整合工作流主函数 - 完整的7步工作流
+    整合工作流主函数
 
     执行顺序：
     1. 黑名单检查 -> 可能终止
@@ -1572,225 +1212,55 @@ def main(
     6. 上下文提示词生成
     7. 长期记忆提示词生成 -> 返回最终结果
 
-    跨群配置说明：
-    - favor_cross_group: 好感度是否跨群共享
-    - persona_cross_group: 用户画像是否跨群共享
-    - blacklist_cross_group: 黑名单状态是否跨群共享
-    - usage_limit_cross_group: 用量统计是否跨群共享
-
-    返回：包含各步骤结果和最终增强的主提示词的字典
+    返回：包含完整字段的字典（无论在哪一步结束）
     """
 
     # 初始化工作流
     workflow = IntegratedWorkflow(MONGO_URL)
 
-    # 设置跨群配置到MongoDBSystem实例
-    workflow.mongo_system.set_cross_group_config(
-        favor_cross_group=favor_cross_group,
-        persona_cross_group=persona_cross_group,
-        blacklist_cross_group=blacklist_cross_group,
-        usage_limit_cross_group=usage_limit_cross_group
+    # 设置跨群配置
+    workflow.mongo_system.set_cross_group_config(favor_cross_group, persona_cross_group, blacklist_cross_group, usage_limit_cross_group)
+
+    # 初始化上下文
+    context = workflow._init_context(bot_id, group_id, user_id, user_query, main_prompt)
+
+    # 步骤1：黑名单检查
+    context = workflow.check_blacklist(
+        context,
+        blacklist_system, is_user_admin, blacklist_restrict_admin_users,
+        warn_lifespan, block_lifespan, timestamp
     )
-    # 第1步：黑名单检查
-    step1_result = workflow.step_1_blacklist_check(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        blacklist_system=blacklist_system,
-        is_user_admin=is_user_admin,
-        blacklist_restrict_admin_users=blacklist_restrict_admin_users,
-        warn_lifespan=warn_lifespan,
-        block_lifespan=block_lifespan,
-        timestamp=timestamp
+    if context["stop_reason"] is not None:
+        return context
+
+    # 步骤2：输入长度检查
+    context = workflow.check_input_length(context, max_input_size, overinput_output)
+    if context["stop_reason"] is not None:
+        return context
+
+    # 步骤3：用量限制检查
+    context = workflow.check_usage_limit(
+        context,
+        usage_limit_system, usage_restrict_admin_users, is_user_admin,
+        usage_limit, year, month, day, overusage_output
     )
-    
-    # 如果黑名单检查未通过，立即返回（展平的字典，包含所有字段的默认值）
-    if not step1_result.get("continue_to_step_2", False):
-        return {
-            "stop_reason": step1_result["stop_reason"],
-            "stop_message": step1_result["stop_message"],
-            "step_stopped_at": 1,
-            "main_prompt": main_prompt,
-            # 步骤1结果
-            "block_status": step1_result.get("block_status", "pass"),
-            "block_message": step1_result.get("stop_message", " "),
-            # 步骤2结果（默认值）
-            "step2_input_length": 0,
-            "step2_max_length": 0,
-            # 步骤3结果（默认值）
-            "step3_current_usage": 0,
-            "step3_usage_limit": 0,
-            "step3_usage_date": " ",
-            # 步骤4结果（默认值）
-            "favor_value": 0,
-            "favor_prompt": " ",
-            # 步骤5结果（默认值）
-            "persona": " ",
-            # 步骤6结果（默认值）
-            "context": " ",
-            "step6_context_count": 0,
-            # 步骤7结果（默认值）
-            "step7_hit_memories": " "
-        }
-    
-    # 第2步：输入长度检查
-    step2_result = workflow.step_2_input_length_check(
-        user_query=user_query,
-        max_input_size=max_input_size,
-        overinput_output=overinput_output
-    )
-    
-    # 如果输入长度检查未通过，立即返回（展平的字典，包含所有字段的默认值）
-    if not step2_result.get("continue_to_step_3", False):
-        return {
-            "stop_reason": step2_result["stop_reason"],
-            "stop_message": step2_result["stop_message"],
-            "step_stopped_at": 2,
-            "main_prompt": main_prompt,
-            # 步骤1结果
-            "block_status": step1_result.get("block_status", "pass"),
-            "block_message": step1_result.get("stop_message", " "),
-            # 步骤2结果
-            "step2_input_length": step2_result.get("input_length", 0),
-            "step2_max_length": step2_result.get("max_length", 0),
-            # 步骤3结果（默认值）
-            "step3_current_usage": 0,
-            "step3_usage_limit": 0,
-            "step3_usage_date": " ",
-            # 步骤4结果（默认值）
-            "favor_value": 0,
-            "favor_prompt": " ",
-            # 步骤5结果（默认值）
-            "persona": " ",
-            # 步骤6结果（默认值）
-            "context": " ",
-            "step6_context_count": 0,
-            # 步骤7结果（默认值）
-            "step7_hit_memories": " "
-        }
-    
-    # 第3步：用量限制检查
-    step3_result = workflow.step_3_usage_limit_check(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        usage_limit_system=usage_limit_system,
-        usage_restrict_admin_users=usage_restrict_admin_users,
-        is_user_admin=is_user_admin,
-        usage_limit=usage_limit,
-        year=year,
-        month=month,
-        day=day,
-        overusage_output=overusage_output
-    )
-    
-    # 如果用量限制检查未通过，立即返回（展平的字典，包含所有字段的默认值）
-    if not step3_result.get("continue_to_step_4", False):
-        usage_info = step3_result.get("usage_info", {})
-        return {
-            "stop_reason": step3_result["stop_reason"],
-            "stop_message": step3_result["stop_message"],
-            "step_stopped_at": 3,
-            "main_prompt": main_prompt,
-            # 步骤1结果
-            "block_status": step1_result.get("block_status", "pass"),
-            "block_message": step1_result.get("stop_message", " "),
-            # 步骤2结果
-            "step2_input_length": step2_result.get("input_length", 0),
-            "step2_max_length": step2_result.get("max_length", 0),
-            # 步骤3结果
-            "step3_current_usage": usage_info.get("current_usage", 0),
-            "step3_usage_limit": usage_info.get("usage_limit", 0),
-            "step3_usage_date": usage_info.get("date", " "),
-            # 步骤4结果（默认值）
-            "favor_value": 0,
-            "favor_prompt": " ",
-            # 步骤5结果（默认值）
-            "persona": " ",
-            # 步骤6结果（默认值）
-            "context": " ",
-            "step6_context_count": 0,
-            # 步骤7结果（默认值）
-            "step7_hit_memories": " "
-        }
-    
-    # 第4步：好感度提示词生成
-    step4_result = workflow.step_4_favor_prompt(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        favor_system=favor_system,
-        favor_prompts=favor_prompts,
-        favor_split_points=favor_split_points,
-        main_prompt=main_prompt
-    )
-    
-    # 更新主提示词
-    current_prompt = step4_result["enhanced_main_prompt"]
-    
-    # 第5步：用户画像提示词生成
-    step5_result = workflow.step_5_persona_prompt(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        persona_system=persona_system,
-        main_prompt=current_prompt
-    )
-    
-    # 更新主提示词
-    current_prompt = step5_result["enhanced_main_prompt"]
-    
-    # 第6步：上下文提示词生成
-    step6_result = workflow.step_6_context_prompt(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        context_system=context_system,
-        context_pool_size=context_pool_size,
-        main_prompt=current_prompt
-    )
-    
-    # 更新主提示词
-    current_prompt = step6_result["enhanced_main_prompt"]
-    
-    # 第7步：长期记忆提示词生成（最后一步）
-    step7_result = workflow.step_7_memory_prompt(
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        memory_system=memory_system,
-        user_query=user_query,
-        memory_retrieval_number=memory_retrieval_number,
-        main_prompt=current_prompt
-    )
-    
-    # 获取usage_info以展平字典
-    usage_info = step3_result.get("usage_info", {})
-    
-    # 构建展平的返回结果字典（不包含嵌套字典）
-    return {
-        "stop_reason": "finish",
-        "stop_message": " ",
-        "step_stopped_at": 7,
-        "main_prompt": step7_result["enhanced_main_prompt"],
-        # 步骤1结果（展平）
-        "block_status": step1_result.get("block_status", "pass"),
-        "block_message": step1_result.get("stop_message", " "),
-        # 步骤2结果（展平）
-        "step2_input_length": step2_result.get("input_length", 0),
-        "step2_max_length": step2_result.get("max_length", 0),
-        # 步骤3结果（展平）
-        "step3_current_usage": usage_info.get("current_usage", 0),
-        "step3_usage_limit": usage_info.get("usage_limit", 0),
-        "step3_usage_date": usage_info.get("date", ""),
-        # 步骤4结果（展平）
-        "favor_value": step4_result.get("favor_value", 0),
-        "favor_prompt": step4_result.get("favor_prompt", ""),
-        # 步骤5结果（展平）
-        "persona": step5_result.get("persona_text", ""),
-        # 步骤6结果（展平）
-        "context": step6_result.get("context_text", ""),
-        "step6_context_count": step6_result.get("context_count", 0),
-        # 步骤7结果（展平，将hit_memories转为JSON字符串）
-        "step7_hit_memories": json.dumps(step7_result.get("hit_memories", []), ensure_ascii=False)
-    }
+    if context["stop_reason"] is not None:
+        return context
+
+    # 步骤4：好感度提示词生成
+    context = workflow.generate_favor_prompt(context, favor_system, favor_prompts, favor_split_points)
+
+    # 步骤5：用户画像提示词生成
+    context = workflow.generate_persona_prompt(context, persona_system)
+
+    # 步骤6：上下文提示词生成
+    context = workflow.generate_context_prompt(context, context_system, context_pool_size)
+
+    # 步骤7：长期记忆提示词生成
+    context = workflow.generate_memory_prompt(context, memory_system, memory_retrieval_number)
+
+    # 标记工作流成功完成
+    context["stop_reason"] = "finish"
+
+    # 返回完整结果
+    return context

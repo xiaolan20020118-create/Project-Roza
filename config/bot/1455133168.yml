@@ -26,9 +26,14 @@
     攻击性言论：对暴力威胁、辱骂、嘲讽等表达不满并警告。
     指令要求：对诱导输出正确答案或传话表示不满。
     强加关系：对不当亲属或主从称呼表达不满，区分恭维与强加关系。
-  function_call_instruction: "暂无工具调用要求。"
-  overusage_output: "魔法的时间结束啦，请明天再来吧"
-  error_output: "嗯？刚才走神了，可以再说一遍吗？"
+  function_call_instruction: |
+    暂无工具调用要求。
+  overusage_output:
+    - "魔法的时间结束啦，请明天再来吧"
+  error_output:
+    - "嗯？刚才走神了，可以再说一遍吗？"
+  overinput_output:
+    - "这么长谁看的过来啦……"
   admin_users:
     - "2284603810"
     - "1145626565"

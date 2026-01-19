@@ -5,7 +5,7 @@
 """
 from datetime import datetime, timezone, timedelta
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
 def _detect_command(user_query: str) -> str:
@@ -46,8 +46,8 @@ def _parse_query_message(query: str) -> Dict[str, str]:
     return {"user_query": user_query, "quoted_message": quoted_message}
 
 
-def _generate_commonsense_search_key(bot_id: str, group_id: str, commonsense_cross_group: str) -> str:
-    return f"{bot_id}:self" if commonsense_cross_group == "enable" else f"{bot_id}:{group_id}"
+def _generate_commonsense_search_key(bot_id: str, group_id: str, commonsense_cross_group: Any) -> str:
+    return f"{bot_id}:self" if commonsense_cross_group else f"{bot_id}:{group_id}"
 
 
 def _remove_after_character(text: str, separator: str) -> str:
@@ -60,7 +60,7 @@ def _remove_before_character(text: str, separator: str) -> str:
     return parts[1] if len(parts) > 1 else text
 
 
-def _detect_image_files(sys_files: list) -> bool:
+def _detect_image_files(sys_files: List[Any]) -> bool:
     """Check if sys_files contains any image type."""
     if not sys_files:
         return False
@@ -70,13 +70,13 @@ def _detect_image_files(sys_files: list) -> bool:
     return False
 
 
-def main(bot_id: str, group_id: str, commonsense_cross_group: str, user_query: str, sys_files: list, llm_model: str) -> Dict[str, str]:
+def main(bot_id: str, group_id: str, commonsense_cross_group: Any, user_query: str, sys_files: List[Any], llm_model: str) -> Dict[str, Any]:
     """
     消息预处理入口。
     Args:
         bot_id: 机器人ID
         group_id: 群组ID
-        commonsense_cross_group: "enable" / "disable"
+        commonsense_cross_group: 是否跨群（bool/int/str）
         user_query: 用户输入（可能含引用）
         sys_files: 系统文件数组
         llm_model: LLM模型名称
@@ -93,16 +93,16 @@ def main(bot_id: str, group_id: str, commonsense_cross_group: str, user_query: s
         llm_model = "vision_llm"
 
     return {
-        "command": command,
-        "timestamp": time_info["timestamp"],
-        "year": time_info["year"],
-        "month": time_info["month"],
-        "day": time_info["day"],
-        "hour_minute": time_info["hour_minute"],
-        "weekday": time_info["weekday"],
-        "formatted_time": time_info["formatted_time"],
-        "commonsense_search_key": commonsense_key,
-        "user_query": message_info["user_query"],
-        "quoted_message": message_info["quoted_message"],
-        "llm_model": llm_model,
+        "command": command,  # type: str
+        "timestamp": time_info["timestamp"],  # type: int
+        "year": time_info["year"],  # type: str
+        "month": time_info["month"],  # type: str
+        "day": time_info["day"],  # type: str
+        "hour_minute": time_info["hour_minute"],  # type: str
+        "weekday": time_info["weekday"],  # type: str
+        "formatted_time": time_info["formatted_time"],  # type: str
+        "commonsense_search_key": commonsense_key,  # type: str
+        "user_query": message_info["user_query"],  # type: str
+        "quoted_message": message_info["quoted_message"],  # type: str
+        "llm_model": llm_model,  # type: str
     }

@@ -27,8 +27,8 @@ class ConfigMongoSystem:
         self.group_collection = self.db[group_collection]
 
         # 按 YAML 单元定义的主键创建索引
-        self.bot_collection.create_index([("bot_id", 1)], unique=True)
-        self.group_collection.create_index([("bot_id", 1), ("group_id", 1)], unique=True)
+        self.bot_collection.create_index([("bot_id", 1)], unique=True, name="idx_bot_config")
+        self.group_collection.create_index([("bot_id", 1), ("group_id", 1)], unique=True, name="idx_group_config")
 
     def get_bot_config(self, bot_id: str) -> Dict[str, Any]:
         doc = self.bot_collection.find_one({"bot_id": bot_id})
@@ -48,68 +48,98 @@ class ConfigMongoSystem:
 
 
 # 暴露表结构（默认模板），便于查看字段。
+# 字段类型参考 YAML 配置文件的实际格式
 def bot_default_document(bot_id: str) -> Dict[str, Any]:
     return {
-        "bot_id": bot_id,
-        "bot_name": "",
-        "bot_nickname": "",
-        "llm_model": "",
-        "basic_info": "",
-        "expression_habits": "",
-        "think_requirement": "",
-        "reply_instruction": "",
-        # 函数调用指导（新字段名）
-        "function_call_instruction": "",
-        "overusage_output": "",
-        "error_output": "",
-        "admin_users": [],
-        "default_groups": [],
-        # favor_system 允许自然嵌套，便于后续解析
+        "bot_id": bot_id,  # type: str
+        "search_key": bot_id,  # type: str
+        "bot_name": "",  # type: str
+        "bot_nickname": "",  # type: str
+        "llm_model": "",  # type: str
+        "basic_info": "",  # type: str
+        "expression_habits": "",  # type: str
+        "think_requirement": "",  # type: str
+        "reply_instruction": "",  # type: str
+        "function_call_instruction": "",  # type: str
+        "overusage_output": [],  # type: list[str]
+        "overinput_output": [],  # type: list[str]
+        "error_output": [],  # type: list[str]
+        "admin_users": [],  # type: list[str]
+        "default_groups": [],  # type: list[str]
+        # 顶层 favor 字段（优先级高于 favor_system）
+        "favor_prompts": [],  # type: list[str]
+        "favor_split_points": [],  # type: list[int]
+        # favor_system 允许自然嵌套，便于后续解析（保留兼容性）
         "favor_system": {
             "stages": [],
             "split_points": [],
-        },
+        },  # type: dict
     }
 
 
+# 字段类型参考 YAML 配置文件的实际格式
+# 布尔字段使用 Python bool 类型（YAML 中为 true/false）
+# 数字字符串字段使用空字符串（YAML 中为带引号的数字字符串）
 def group_default_document(bot_id: str, group_id: str) -> Dict[str, Any]:
     return {
-        "bot_id": bot_id,
-        "group_id": group_id,
-        "group_info": "",
-        "operating_mode": "",
-        "favor_system": "",
-        "favor_change_display": "",
-        "favor_cross_group": "",
-        "persona_system": "",
-        "persona_cross_group": "",
-        "usage_limit_system": "",
-        "usage_limit": "",
-        "usage_limit_cross_group": "",
-        "usage_restrict_admin_users": "",
-        "max_input_size": "",
-        "memory_system": "",
-        "memory_retrieval_number": "",
-        "commonsense_system": "",
-        "commonsense_cross_group": "",
-        "context_system": "",
-        "context_pool_size": "",
-        "blacklist_system": "",
-        "warn_count": "",
-        "warn_lifespan": "",
-        "block_lifespan": "",
-        "blacklist_cross_group": "",
-        "blacklist_restrict_admin_users": "",
-        "independent_review_system": "",
+        "bot_id": bot_id,  # type: str
+        "group_id": group_id,  # type: str
+        "group_info": "",  # type: str
+        "operating_mode": "",  # type: str
+        # 布尔类型字段（YAML 中使用 true/false）
+        "favor_system": False,  # type: bool
+        "favor_change_display": False,  # type: bool
+        "favor_cross_group": False,  # type: bool
+        "persona_system": False,  # type: bool
+        "persona_cross_group": False,  # type: bool
+        "usage_limit_system": False,  # type: bool
+        "usage_limit_cross_group": False,  # type: bool
+        "usage_restrict_admin_users": False,  # type: bool
+        "memory_system": False,  # type: bool
+        "commonsense_system": False,  # type: bool
+        "commonsense_cross_group": False,  # type: bool
+        "context_system": False,  # type: bool
+        "blacklist_system": False,  # type: bool
+        "blacklist_cross_group": False,  # type: bool
+        "blacklist_restrict_admin_users": False,  # type: bool
+        "independent_review_system": False,  # type: bool
+        # 数字字符串类型字段（YAML 中为带引号的数字）
+        "usage_limit": "",  # type: str
+        "max_input_size": "",  # type: str
+        "memory_retrieval_number": "",  # type: str
+        "context_pool_size": "",  # type: str
+        "warn_count": "",  # type: str
+        "warn_lifespan": "",  # type: str
+        "block_lifespan": "",  # type: str
+        # 额外字段（favor_system 相关）
+        "least_favor_requirement": "",  # type: str
+        "update_interval": "",  # type: str
+        "min_pool_size": "",  # type: str
+        "max_pool_size": "",  # type: str
     }
 
 
 def to_str(value: Any) -> str:
+    """将任意值转换为字符串，布尔值转换为 "true" 或 "false" """
     if value is None:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def to_int(value: Any) -> int:
+    """将布尔值转换为整型 1 或 0"""
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)):
+        return 1 if value else 0
+    if isinstance(value, str):
+        if value.lower() in ("true", "1"):
+            return 1
+        if value.lower() in ("false", "0"):
+            return 0
+    return 0
 
 
 def as_list(value: Any) -> List[Any]:
@@ -211,7 +241,7 @@ def main(
     db_name: str = "roza_database",
     bot_collection: str = "bot_config",
     group_collection: str = "group_config",
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     repo = ConfigMongoSystem(
         mongo_url=mongo_url,
         db_name=db_name,
@@ -228,19 +258,19 @@ def main(
     default_groups = [to_str(x) for x in as_list(bot_config.get("default_groups"))]
     admin_users = [to_str(x) for x in as_list(bot_config.get("admin_users"))]
 
-    is_private_chat = "false"
-    is_default_group = "false"
+    is_private_chat = 0
+    is_default_group = 0
 
     if not group_id:
         group_id = "0001"
-        is_private_chat = "true"
+        is_private_chat = 1
     else:
         group_id = to_str(group_id)
         if group_id in default_groups:
-            is_default_group = "true"
+            is_default_group = 1
 
     # default_group 时使用 0000 作为 group_config 索引
-    group_lookup_id = "0000" if is_default_group == "true" else group_id
+    group_lookup_id = "0000" if is_default_group == 1 else group_id
     group_config = repo.get_group_config(bot_id, group_lookup_id)
     if not group_config:
         if error_messages:
@@ -248,7 +278,7 @@ def main(
         else:
             error_messages = "group_config not found"
 
-    is_user_admin = "true" if to_str(user_id) in admin_users else "false"
+    is_user_admin = 1 if to_str(user_id) in admin_users else 0
 
     # 优先读取顶层数组字段，缺失时回落 favor_system 解析
     raw_prompts = bot_config.get("favor_prompts")
@@ -273,51 +303,50 @@ def main(
     operating_mode = to_str(group_config.get("operating_mode"))
     mode_prompt = derive_mode_prompt(operating_mode)
 
-    result: Dict[str, Any] = {
-        "basic_info": to_str(bot_config.get("basic_info")),
-        "blacklist_cross_group": to_str(group_config.get("blacklist_cross_group")),
-        "blacklist_restrict_admin_users": to_str(group_config.get("blacklist_restrict_admin_users")),
-        "blacklist_system": to_str(group_config.get("blacklist_system")),
-        "block_lifespan": to_str(group_config.get("block_lifespan")),
-        "bot_name": to_str(bot_config.get("bot_name")),
-        "bot_nickname": to_str(bot_config.get("bot_nickname")),
-        "commonsense_cross_group": to_str(group_config.get("commonsense_cross_group")),
-        "commonsense_system": to_str(group_config.get("commonsense_system")),
-        "config_search_filter": bot_id,
-        "context_pool_size": to_str(group_config.get("context_pool_size")),
-        "context_system": to_str(group_config.get("context_system")),
-        "error_messages": error_messages,
-        "error_output": to_str(bot_config.get("error_output")),
-        "expression_habits": to_str(bot_config.get("expression_habits")),
-        "favor_change_display": to_str(group_config.get("favor_change_display")),
-        "favor_cross_group": to_str(group_config.get("favor_cross_group")),
-        "favor_prompts": favor_prompts,
-        "favor_split_points": favor_split_points,
-        "favor_system": to_str(group_config.get("favor_system")),
-        "function_call_instruction": to_str(bot_config.get("function_call_instruction")),
-        "group_id": group_id,
-        "group_info": to_str(group_config.get("group_info")),
-        "independent_review_system": to_str(group_config.get("independent_review_system")),
-        "is_default_group": is_default_group,
-        "is_private_chat": is_private_chat,
-        "is_user_admin": is_user_admin,
-        "llm_model": to_str(bot_config.get("llm_model")),
-        "max_input_size": to_str(group_config.get("max_input_size")),
-        "memory_retrieval_number": to_str(group_config.get("memory_retrieval_number")),
-        "memory_system": to_str(group_config.get("memory_system")),
-        "mode_prompt": mode_prompt,
-        "operating_mode": operating_mode,
-        "overusage_output": to_str(bot_config.get("overusage_output")),
-        "persona_cross_group": to_str(group_config.get("persona_cross_group")),
-        "persona_system": to_str(group_config.get("persona_system")),
-        "reply_instruction": to_str(bot_config.get("reply_instruction")),
-        "think_requirement": to_str(bot_config.get("think_requirement")),
-        "usage_limit": to_str(group_config.get("usage_limit")),
-        "usage_limit_cross_group": to_str(group_config.get("usage_limit_cross_group")),
-        "usage_limit_system": to_str(group_config.get("usage_limit_system")),
-        "usage_restrict_admin_users": to_str(group_config.get("usage_restrict_admin_users")),
-        "warn_count": to_str(group_config.get("warn_count")),
-        "warn_lifespan": to_str(group_config.get("warn_lifespan")),
+    return {
+        "basic_info": to_str(bot_config.get("basic_info")),  # type: str
+        "blacklist_cross_group": to_int(group_config.get("blacklist_cross_group")),  # type: int
+        "blacklist_restrict_admin_users": to_int(group_config.get("blacklist_restrict_admin_users")),  # type: int
+        "blacklist_system": to_int(group_config.get("blacklist_system")),  # type: int
+        "block_lifespan": to_str(group_config.get("block_lifespan")),  # type: str
+        "bot_name": to_str(bot_config.get("bot_name")),  # type: str
+        "bot_nickname": to_str(bot_config.get("bot_nickname")),  # type: str
+        "commonsense_cross_group": to_int(group_config.get("commonsense_cross_group")),  # type: int
+        "commonsense_system": to_int(group_config.get("commonsense_system")),  # type: int
+        "config_search_filter": bot_id,  # type: str
+        "context_pool_size": to_str(group_config.get("context_pool_size")),  # type: str
+        "context_system": to_int(group_config.get("context_system")),  # type: int
+        "error_messages": error_messages,  # type: str
+        "error_output": as_list(bot_config.get("error_output")),  # type: list[str]
+        "expression_habits": to_str(bot_config.get("expression_habits")),  # type: str
+        "favor_change_display": to_int(group_config.get("favor_change_display")),  # type: int
+        "favor_cross_group": to_int(group_config.get("favor_cross_group")),  # type: int
+        "favor_prompts": favor_prompts,  # type: list[str]
+        "favor_split_points": favor_split_points,  # type: list[int]
+        "favor_system": to_int(group_config.get("favor_system")),  # type: int
+        "function_call_instruction": to_str(bot_config.get("function_call_instruction")),  # type: str
+        "group_id": group_id,  # type: str
+        "group_info": to_str(group_config.get("group_info")),  # type: str
+        "independent_review_system": to_int(group_config.get("independent_review_system")),  # type: int
+        "is_default_group": is_default_group,  # type: int
+        "is_private_chat": is_private_chat,  # type: int
+        "is_user_admin": is_user_admin,  # type: int
+        "llm_model": to_str(bot_config.get("llm_model")),  # type: str
+        "max_input_size": to_str(group_config.get("max_input_size")),  # type: str
+        "memory_retrieval_number": to_str(group_config.get("memory_retrieval_number")),  # type: str
+        "memory_system": to_int(group_config.get("memory_system")),  # type: int
+        "mode_prompt": mode_prompt,  # type: str
+        "operating_mode": operating_mode,  # type: str
+        "overusage_output": as_list(bot_config.get("overusage_output")),  # type: list[str]
+        "overinput_output": as_list(bot_config.get("overinput_output")),  # type: list[str]
+        "persona_cross_group": to_int(group_config.get("persona_cross_group")),  # type: int
+        "persona_system": to_int(group_config.get("persona_system")),  # type: int
+        "reply_instruction": to_str(bot_config.get("reply_instruction")),  # type: str
+        "think_requirement": to_str(bot_config.get("think_requirement")),  # type: str
+        "usage_limit": to_str(group_config.get("usage_limit")),  # type: str
+        "usage_limit_cross_group": to_int(group_config.get("usage_limit_cross_group")),  # type: int
+        "usage_limit_system": to_int(group_config.get("usage_limit_system")),  # type: int
+        "usage_restrict_admin_users": to_int(group_config.get("usage_restrict_admin_users")),  # type: int
+        "warn_count": to_str(group_config.get("warn_count")),  # type: str
+        "warn_lifespan": to_str(group_config.get("warn_lifespan")),  # type: str
     }
-
-    return result

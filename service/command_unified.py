@@ -1,7 +1,7 @@
 import re
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pymongo
 
@@ -19,6 +19,10 @@ class MongoDBSystem:
 
     def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return self.collection.find_one(query)
+
+    def aggregate(self, pipeline: List[Dict[str, Any]]) -> pymongo.command_cursor.CommandCursor:
+        """执行聚合管道查询"""
+        return self.collection.aggregate(pipeline)
 
     def update_many(self, query: Dict[str, Any], updates: Dict[str, Any]) -> Tuple[int, int]:
         result = self.collection.update_many(query, {"$set": updates})
@@ -368,6 +372,8 @@ def _apply_set(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field
 def _apply_rank(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, field: str, limit: int) -> List[Tuple[str, Any]]:
     """对指定字段进行排序，返回前N个结果
 
+    使用 MongoDB 原生排序功能，避免加载全部数据到内存中排序。
+
     Args:
         mongo: MongoDB 实例
         query: 查询条件
@@ -378,50 +384,58 @@ def _apply_rank(mongo: MongoDBSystem, query: Dict[str, Any], type_key: str, fiel
     Returns:
         List[Tuple[user_id, value]]: 用户ID和对应值的列表
     """
-    docs = mongo.find(query)
-
-    # 提取每个文档的排序字段值
     results = []
-    for doc in docs:
-        # 清理 user_id 和 value，去除数据库中可能存在的空白字符
-        user_id = str(doc.get("user_id", "")).strip()
-        raw_value = _get_nested(doc, field)
 
-        # 处理不同类型的值
-        if raw_value is None:
-            numeric_value = 0
-        elif isinstance(raw_value, (int, float)):
-            numeric_value = raw_value
-        elif isinstance(raw_value, list):
-            # 对于数组类型（如 history_entries, long_term_memory），使用长度
-            numeric_value = len(raw_value)
-        else:
-            # 字符串类型先去除空白字符再转换
-            try:
-                numeric_value = float(str(raw_value).strip())
-            except (ValueError, TypeError):
+    if field == "history_entries":
+        # 数组类型：使用聚合管道按数组长度排序
+        pipeline = [
+            {"$match": query},
+            {"$addFields": {"_sort_value": {"$size": "$history_entries"}}},
+            {"$sort": {"_sort_value": -1}},
+            {"$limit": limit},
+            {"$project": {"user_id": 1, "_sort_value": 1}}
+        ]
+        for doc in mongo.aggregate(pipeline):
+            user_id = str(doc.get("user_id", "")).strip()
+            results.append((user_id, doc.get("_sort_value", 0)))
+    else:
+        # 数值类型（包括嵌套字段如 total_usage.total_tokens）
+        # MongoDB 原生支持嵌套字段排序，直接在数据库层面完成排序和截断
+        for doc in mongo.collection.find(query).sort(field, -1).limit(limit):
+            user_id = str(doc.get("user_id", "")).strip()
+            raw_value = _get_nested(doc, field)
+
+            # 处理不同类型的值
+            if raw_value is None:
                 numeric_value = 0
+            elif isinstance(raw_value, (int, float)):
+                numeric_value = raw_value
+            elif isinstance(raw_value, list):
+                # 兼容处理：如果实际数据是数组，使用长度
+                numeric_value = len(raw_value)
+            else:
+                # 字符串类型转换
+                try:
+                    numeric_value = float(str(raw_value).strip())
+                except (ValueError, TypeError):
+                    numeric_value = 0
 
-        results.append((user_id, numeric_value))
+            results.append((user_id, numeric_value))
 
-    # 按值从大到小排序
-    results.sort(key=lambda x: x[1], reverse=True)
-
-    # 返回前 limit 个结果
-    return results[:limit]
+    return results
 
 
 def execute_command(
     user_query: str,
     bot_id: str,
     group_id: str,
-    is_user_admin: str,
+    is_user_admin: Any,
     context_pool_size: int,
     mongo_url: str,
-    usage_limit_cross_group: str = "disable",
-    persona_cross_group: str = "disable",
-    favor_cross_group: str = "disable",
-    blacklist_cross_group: str = "disable",
+    usage_limit_cross_group: Any = False,
+    persona_cross_group: Any = False,
+    favor_cross_group: Any = False,
+    blacklist_cross_group: Any = False,
 ) -> Dict[str, Any]:
     """Unified command entry point."""
     response: Dict[str, Any] = {
@@ -436,7 +450,7 @@ def execute_command(
         "has_any": False,
     }
 
-    if is_user_admin != "true":
+    if is_user_admin != 1:
         response["result"] = "无管理员权限，无法执行此操作"
         return response
 
@@ -524,7 +538,7 @@ def execute_command(
                 pass  # query already built
             else:
                 # normal mode: apply cross-group logic
-                cross_enabled = cross_group_map.get(type_key, "disable") == "enable"
+                cross_enabled = bool(cross_group_map.get(type_key, False))
                 if param == "all":
                     query = {"bot_id": bot_id}
                     if not cross_enabled:
@@ -580,7 +594,7 @@ def execute_command(
             for idx in range(0, len(params), 2):
                 uid = params[idx]
                 value = params[idx + 1]
-                cross_enabled = cross_group_map.get(type_key, "disable") == "enable"
+                cross_enabled = bool(cross_group_map.get(type_key, False))
                 if uid == "all":
                     query = {"bot_id": bot_id}
                     if not cross_enabled:
@@ -667,13 +681,13 @@ def main(
     user_query: str,
     bot_id: str,
     group_id: str,
-    is_user_admin: str,
+    is_user_admin: Any,
     context_pool_size: int,
     mongo_url: str,
-    usage_limit_cross_group: str = "disable",
-    persona_cross_group: str = "disable",
-    favor_cross_group: str = "disable",
-    blacklist_cross_group: str = "disable",
+    usage_limit_cross_group: Any = False,
+    persona_cross_group: Any = False,
+    favor_cross_group: Any = False,
+    blacklist_cross_group: Any = False,
 ) -> Dict[str, Any]:
     """Thin wrapper to comply with main entry requirement."""
     resp = execute_command(
@@ -691,13 +705,13 @@ def main(
 
     # Explicit flat output for downstream consumption
     return {
-        "result": resp.get("result", ""),
-        "command_type": resp.get("command_type", ""),
-        "parameters": resp.get("parameters", []),
-        "modified_count": resp.get("modified_count", 0),
-        "logs": resp.get("logs", []),
-        "action": resp.get("action", ""),
-        "type_key": resp.get("type_key", ""),
-        "field": resp.get("field", ""),
-        "has_any": resp.get("has_any", False),
+        "result": resp.get("result", ""),  # type: str
+        "command_type": resp.get("command_type", ""),  # type: str
+        "parameters": resp.get("parameters", []),  # type: list
+        "modified_count": resp.get("modified_count", 0),  # type: int
+        "logs": resp.get("logs", ""),  # type: str
+        "action": resp.get("action", ""),  # type: str
+        "type_key": resp.get("type_key", ""),  # type: str
+        "field": resp.get("field", ""),  # type: str
+        "has_any": "true" if resp.get("has_any", False) else "false",  # type: str
     }

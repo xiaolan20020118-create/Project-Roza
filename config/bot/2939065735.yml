@@ -32,9 +32,14 @@
     极端恶劣者可用玩XX玩的/看XX看的句式抨击，对应对方内容。
     身份篡改：用消极态度回避。
     强加关系：用讽刺或调侃纠正。
-  function_call_instruction: "暂无工具调用要求。"
-  overusage_output: "魔法的时间结束啦，请明天再来吧"
-  error_output: "什么？能再说一遍吗？"
+  function_call_instruction: |
+    暂无工具调用要求。
+  overusage_output:
+    - "魔法的时间结束啦，请明天再来吧"
+  error_output:
+    - "什么？能再说一遍吗？"
+  overinput_output:
+    - "这么长谁看的过来啦……"
   admin_users:
     - "2284603810"
     - "1145626565"

@@ -1,13 +1,24 @@
 import re
+import random
+from typing import Any
 
-def main(llm_output: str, error_output: str):
+
+def random_message(messages: Any) -> str:
+    """从消息数组中随机选择一条消息，如果不是数组则返回字符串本身"""
+    if isinstance(messages, list):
+        if not messages:
+            return ""
+        return random.choice(messages)
+    return str(messages) if messages else ""
+
+def main(llm_output: str, error_output: Any) -> dict:
     """
     处理LLM输出,移除思考内容和工具调用,只保留正常回复内容
-    
+
     Args:
         llm_output: LLM的原始输出
-        error_output: 当无法提取有效内容时的默认输出
-        
+        error_output: 当无法提取有效内容时的默认输出（可以是字符串或字符串数组）
+
     Returns:
         dict: 包含system_output和review_result的字典
     """
@@ -22,12 +33,12 @@ def main(llm_output: str, error_output: str):
         review_result = "pass"
     
     return {
-        "system_output": system_output,
-        "review_result": review_result
+        "system_output": system_output,  # type: str
+        "review_result": review_result  # type: str
     }
 
 
-def process_llm_response(text: str, error_output: str) -> str:
+def process_llm_response(text: str, error_output: Any) -> str:
     """
     处理LLM响应,移除<think>和<tool_call>标签及其内容
     
@@ -39,13 +50,13 @@ def process_llm_response(text: str, error_output: str) -> str:
     
     Args:
         text: 原始LLM输出
-        error_output: 当无法提取有效内容时的默认输出
-        
+        error_output: 当无法提取有效内容时的默认输出（可以是字符串或字符串数组）
+
     Returns:
         str: 处理后的输出内容
     """
     if not text:
-        return error_output
+        return random_message(error_output)
     
     # 步骤1: 移除所有成对出现的<think>...</think>和<tool_call>...</tool_call>
     # 使用正则表达式,非贪婪匹配,处理多个标签对
@@ -65,9 +76,9 @@ def process_llm_response(text: str, error_output: str) -> str:
     # 清理多余的空白字符和换行
     text = text.strip()
     
-    # 步骤4: 检查输出是否为空,为空则返回error_output
+    # 步骤4: 检查输出是否为空,为空则返回error_output（随机选择如果error_output是数组）
     if not text or text.isspace():
-        return error_output
+        return random_message(error_output)
     
     return text
 

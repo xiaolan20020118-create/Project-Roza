@@ -485,13 +485,13 @@ def main(structured_output: Dict[str, Any]) -> Dict[str, Any]:
 
     # 显式构建返回字典
     return {
-        "text": text,
-        "think_output": think_output,
-        "image_info": image_info,
-        "timer": timer,
-        "scheduled_events": scheduled_events,
-        "leap_events": leap_events,
-        "is_valid": is_valid,
-        "validation_errors": validation_errors,
-        "validation_warnings": validation_warnings,
+        "text": text,  # type: str
+        "think_output": think_output,  # type: str
+        "image_info": image_info,  # type: list
+        "timer": timer,  # type: float | None
+        "scheduled_events": scheduled_events,  # type: str
+        "leap_events": leap_events,  # type: str
+        "is_valid": is_valid,  # type: bool
+        "validation_errors": validation_errors,  # type: list
+        "validation_warnings": validation_warnings,  # type: list
     }

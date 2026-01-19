@@ -5,19 +5,15 @@ from typing import Dict, Any, List
 
 
 class MongoDBSystem:
-    """统一的MongoDB系统 - 管理所有数据库操作"""
-    
+    """统一的MongoDB系统 - 管理所有数据库操作
+
+    注意: 索引由 integrated_workflow.py 统一创建，此处不再重复创建
+    """
+
     def __init__(self, mongo_url: str, db_name: str = "roza_database"):
         self.client = pymongo.MongoClient(mongo_url)
         self.db = self.client[db_name]
         self.collection = self.db["user_data"]
-        
-        # 创建复合索引，确保快速查询
-        self.collection.create_index([
-            ("bot_id", 1),
-            ("group_id", 1), 
-            ("user_id", 1)
-        ], unique=True)
     
     def get_field(self, bot_id: str, group_id: str, user_id: str, field_name: str) -> Any:
         """提取指定字段"""
@@ -171,15 +167,14 @@ def main(
     # 如果output中包含错误标识，跳过更新
     if isinstance(output, dict) and output.get("error") == error_output:
         return {
-            "total_histories": 0,
-            "history_entry": "{}",
-            "matched_count": 0,
-            "modified_count": 0,
-            # 添加token统计字段
-            "total_chat_count": 0,
-            "total_tokens": 0,
-            "total_prompt_token": 0,
-            "total_output_token": 0
+            "total_histories": 0,  # type: int
+            "history_entry": "{}",  # type: str
+            "matched_count": 0,  # type: int
+            "modified_count": 0,  # type: int
+            "total_chat_count": 0,  # type: int
+            "total_tokens": 0,  # type: int
+            "total_prompt_token": 0,  # type: int
+            "total_output_token": 0  # type: int
         }
     
     # 初始化系统
@@ -259,13 +254,12 @@ def main(
 
     # 返回结果（将history_entry转换为JSON字符串，并包含total_usage的四个字段）
     return {
-        "total_histories": update_result["total_histories"],
-        "history_entry": json.dumps(history_entry, ensure_ascii=False),
-        "matched_count": update_result["matched_count"],
-        "modified_count": update_result["modified_count"],
-        # 返回total_usage的四个字段
-        "total_chat_count": new_total_usage["total_chat_count"],
-        "total_tokens": new_total_usage["total_tokens"],
-        "total_prompt_token": new_total_usage["total_prompt_token"],
-        "total_output_token": new_total_usage["total_output_token"]
+        "total_histories": update_result["total_histories"],  # type: int
+        "history_entry": json.dumps(history_entry, ensure_ascii=False),  # type: str
+        "matched_count": update_result["matched_count"],  # type: int
+        "modified_count": update_result["modified_count"],  # type: int
+        "total_chat_count": new_total_usage["total_chat_count"],  # type: int
+        "total_tokens": new_total_usage["total_tokens"],  # type: int
+        "total_prompt_token": new_total_usage["total_prompt_token"],  # type: int
+        "total_output_token": new_total_usage["total_output_token"]  # type: int
     }

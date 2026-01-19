@@ -5,19 +5,15 @@ from typing import Dict, Any
 
 
 class MongoDBSystem:
-    """统一的MongoDB系统 - 管理所有数据库操作"""
-    
+    """统一的MongoDB系统 - 管理所有数据库操作
+
+    注意: 索引由 integrated_workflow.py 统一创建，此处不再重复创建
+    """
+
     def __init__(self, mongo_url: str, db_name: str = "roza_database"):
         self.client = pymongo.MongoClient(mongo_url)
         self.db = self.client[db_name]
         self.collection = self.db["user_data"]
-        
-        # 创建复合索引，确保快速查询
-        self.collection.create_index([
-            ("bot_id", 1),
-            ("group_id", 1), 
-            ("user_id", 1)
-        ], unique=True)
 
 
 class FavorUpdater:
@@ -121,7 +117,7 @@ class FavorUpdater:
 
 
 def main(
-    favor_cross_group: str,
+    favor_cross_group: Any,
     favor_judge: str,
     bot_id: str,
     group_id: str,
@@ -131,19 +127,20 @@ def main(
 ) -> Dict[str, Any]:
     """
     好感度更新主函数
-    
+
     参数：
-    - favor_cross_group: 是否跨群组更新 ("enable"/"disable")
+    - favor_cross_group: 是否跨群组更新（整型 1/0）
     - favor_judge: 好感度判断字符串（包含0-9的数字）
     - bot_id: 机器人ID
     - group_id: 群组ID
     - user_id: 用户ID
     - favor_value: 当前好感度值（从主工作流传入，避免重复查询）
     - MONGO_URL: MongoDB连接URL
-    
+
     返回：
     - favor_change: 本次好感度变化量（带符号）
     - new_favor_value: 更新后的好感度值
+    - favor_cross_group: 跨群配置输出（整型 1/0）
     - matched_count: 匹配的文档数量
     - modified_count: 修改的文档数量
     """
@@ -159,7 +156,7 @@ def main(
     new_favor_value = favor_value + favor_change
     
     # 根据favor_cross_group判断更新范围
-    if favor_cross_group == "enable":
+    if favor_cross_group:
         # 跨群组更新
         update_result = favor_updater.update_favor_cross_group(
             bot_id=bot_id,
@@ -179,8 +176,9 @@ def main(
     
     # 返回结果
     return {
-        "favor_change": favor_change,
-        "new_favor_value": new_favor_value,
-        "matched_count": update_result["matched_count"],
-        "modified_count": update_result["modified_count"]
+        "favor_change": favor_change,  # type: int
+        "new_favor_value": new_favor_value,  # type: int
+        "favor_cross_group": 1 if favor_cross_group else 0,  # type: int
+        "matched_count": update_result["matched_count"],  # type: int
+        "modified_count": update_result["modified_count"]  # type: int
     }
