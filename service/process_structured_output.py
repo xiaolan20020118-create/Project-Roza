@@ -178,12 +178,60 @@ def _validate_image_info(value: Any) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def _normalize_field_key(key: str, known_fields: set) -> str:
+    """归一化字段键名，处理 LLM 可能返回的各种格式变体
+
+    支持的变体:
+    - "text" -> "text" (标准格式)
+    - ":text" -> "text" (冒号前缀)
+    - "::text" -> "text" (双冒号前缀)
+    - "field:text" -> "text" (包含目标字段名)
+
+    Args:
+        key: 原始键名
+        known_fields: 已知字段名集合
+
+    Returns:
+        归一化后的键名，如果无法识别则返回原键名
+    """
+    # 如果键名直接匹配已知字段，直接返回
+    if key in known_fields:
+        return key
+
+    # 检查键名中是否包含已知字段名
+    for field in known_fields:
+        if field in key:
+            return field
+
+    # 无法识别，返回原键名
+    return key
+
+
+def _normalize_dict_keys(data: Dict[str, Any], known_fields: set) -> Dict[str, Any]:
+    """归一化字典中的所有键名
+
+    Args:
+        data: 原始字典
+        known_fields: 已知字段名集合
+
+    Returns:
+        键名归一化后的字典
+    """
+    normalized = {}
+    for key, value in data.items():
+        normalized_key = _normalize_field_key(key, known_fields)
+        normalized[normalized_key] = value
+    return normalized
+
+
 def extract_structured_output(input_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """从输入数据中提取结构化输出
 
     支持两种格式:
     1. output 为字典对象: {"output": {"text": "...", ...}}
     2. output 为 JSON 字符串: {"output": "{\\"text\\": \\"...\\"}"}
+
+    同时处理 LLM 可能返回的键名格式变体，如 ":text" -> "text"
 
     Args:
         input_data: 输入的字典数据
@@ -200,14 +248,18 @@ def extract_structured_output(input_data: Dict[str, Any]) -> Optional[Dict[str, 
 
     # 格式1: output 已经是字典
     if isinstance(output, dict):
-        return output
+        # 归一化键名（处理 :text -> text 等情况）
+        known_fields = set(FIELD_DEFINITIONS.keys())
+        return _normalize_dict_keys(output, known_fields)
 
     # 格式2: output 是 JSON 字符串，需要解析
     if isinstance(output, str):
         try:
             parsed = json.loads(output)
             if isinstance(parsed, dict):
-                return parsed
+                # 归一化键名（处理 :text -> text 等情况）
+                known_fields = set(FIELD_DEFINITIONS.keys())
+                return _normalize_dict_keys(parsed, known_fields)
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
