@@ -443,7 +443,7 @@ def execute_command(
         "command_type": "",
         "parameters": [],
         "modified_count": 0,
-        "logs": [],
+        "logs": "[]",
         "action": "",
         "type_key": "",
         "field": "",
@@ -452,6 +452,7 @@ def execute_command(
 
     if is_user_admin != 1:
         response["result"] = "无管理员权限，无法执行此操作"
+        response["logs"] = "[]"
         return response
 
     try:
@@ -472,24 +473,29 @@ def execute_command(
 
     if action not in {"get", "set", "clear", "rank"} or not type_key:
         response["result"] = "指令格式错误"
+        response["logs"] = "[]"
         return response
 
     if action == "set" and not field:
         response["result"] = "set指令必须指定精确字段"
+        response["logs"] = "[]"
         return response
 
     if action == "rank":
         if not field:
             response["result"] = "rank指令必须指定精确字段"
+            response["logs"] = "[]"
             return response
         # 检查类型是否支持 rank
         if type_key not in RANK_FIELDS:
             response["result"] = f"rank指令不支持 {type_key} 类型，支持类型: {', '.join(RANK_FIELDS.keys())}"
+            response["logs"] = "[]"
             return response
         # 尝试解析字段（支持简写）
         resolved_field = _resolve_rank_field(type_key, field)
         if resolved_field is None:
             response["result"] = f"rank指令不支持 {type_key} 类型的 {field} 字段"
+            response["logs"] = "[]"
             return response
         # 使用解析后的完整字段
         field = resolved_field
@@ -573,7 +579,7 @@ def execute_command(
     elif action == "set":
         if has_any:
             if len(params) < 2 or len(params) % 2 != 0:
-                response.update({"result": "any模式需要目标和值成对出现", "logs": logs})
+                response.update({"result": "any模式需要目标和值成对出现", "logs": json.dumps(logs, ensure_ascii=False)})
                 return response
             for idx in range(0, len(params), 2):
                 target = params[idx]
@@ -582,14 +588,14 @@ def execute_command(
                 try:
                     matched, modified = _apply_set(mongo, query, type_key, field, value)
                 except ValueError as e:
-                    response.update({"result": str(e), "modified_count": total_modified, "logs": logs})
+                    response.update({"result": str(e), "modified_count": total_modified, "logs": json.dumps(logs, ensure_ascii=False)})
                     return response
                 total_modified += modified
                 result_lines.append(f"[{target}: 设置完成，匹配{matched}，修改{modified}]")
                 logs.append(_log_entry(command_label, modified, target, "ok" if matched else "not found"))
         else:
             if len(params) % 2 != 0:
-                response.update({"result": "参数数量不正确，对象和值必须成对出现", "logs": logs})
+                response.update({"result": "参数数量不正确，对象和值必须成对出现", "logs": json.dumps(logs, ensure_ascii=False)})
                 return response
             for idx in range(0, len(params), 2):
                 uid = params[idx]
@@ -606,7 +612,7 @@ def execute_command(
                 try:
                     matched, modified = _apply_set(mongo, query, type_key, field, value)
                 except ValueError as e:
-                    response.update({"result": str(e), "modified_count": total_modified, "logs": logs})
+                    response.update({"result": str(e), "modified_count": total_modified, "logs": json.dumps(logs, ensure_ascii=False)})
                     return response
                 total_modified += modified
                 result_lines.append(f"[{uid}: 设置完成，匹配{matched}，修改{modified}]")
@@ -629,6 +635,7 @@ def execute_command(
                     limit = int(params[1])
                 except ValueError:
                     response["result"] = f"limit 必须是整数，得到: {params[1]}"
+                    response["logs"] = "[]"
                     return response
             # 构建 any 模式的查询条件
             parts = scope.split(":")
@@ -650,6 +657,7 @@ def execute_command(
                     limit = int(params[0])
                 except ValueError:
                     response["result"] = f"limit 必须是整数，得到: {params[0]}"
+                    response["logs"] = "[]"
                     return response
 
         # 限制 limit 范围 [1, 30]
